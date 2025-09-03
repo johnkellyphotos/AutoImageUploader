@@ -126,7 +126,6 @@ void download_folder(const char *folder)
     {
         char filepath[512];
         snprintf(filepath, sizeof(filepath), "%s/%%f_%%Y%%m%%d-%%H%%M%%S.jpg", LOCAL_DIR);
-        
         execlp("gphoto2", "gphoto2", "--get-all-files", "--new", "--skip-existing", "--folder", folder, "--filename", filepath, NULL);
         _exit(1);
     } 
@@ -202,6 +201,18 @@ void download_existing_files()
     pclose(fp);
 }
 
+char *get_import_directory() 
+{
+    static char import_dir[1060];
+    char cwd[1024];
+
+    getcwd(cwd, sizeof(cwd));
+    snprintf(import_dir, sizeof(import_dir), "%s/import", cwd); // creates a new folder to store imported photos in
+    mkdir(import_dir, 0755); // makes the directory, if it doesn't already exist
+
+    return import_dir;
+}
+
 int main(int argc, char *argv[]) 
 {
     load_config();
@@ -217,6 +228,8 @@ int main(int argc, char *argv[])
 
     pid_t gphoto_pid = -1;
 
+    char *import_dir = get_import_directory();
+
     while (1) 
     {
         if (gphoto_pid <= 0) 
@@ -226,9 +239,11 @@ int main(int argc, char *argv[])
             gphoto_pid = fork();
             if (gphoto_pid == 0) 
             {
-                execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", "/home/john/import/%f_%Y%m%d-%H%M%S_%C.jpg", NULL);
+                char filename[1100];
+                snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", import_dir);
+                execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL);
                 _exit(1);
-            } 
+            }
             else if (gphoto_pid < 0) 
             {
                 perror("fork failed for wait-event-and-download");
