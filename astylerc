@@ -1,0 +1,8 @@
+--style=allman
+--indent=spaces=4
+--add-braces
+--break-blocks
+--break-elseifs
+--break-one-line-headers
+--pad-comma
+--pad-oper
