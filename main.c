@@ -11,7 +11,7 @@
 const char *LOCAL_DIR;
 const char *TRACK_FILE;
 const char *FTP_URL;
-const char *FTP_USERPWD;
+const char *FTP_PASSWORD;
 
 void load_config() {
   const char *config_path = "./config.json";
@@ -32,16 +32,16 @@ void load_config() {
   struct json_object *parsed_json = json_tokener_parse(data);
   free(data);
 
-  struct json_object *j_local_dir, *j_track_file, *j_ftp_url, *j_ftp_userpwd;
+  struct json_object *j_local_dir, *j_track_file, *j_ftp_url, *j_FTP_PASSWORD;
   json_object_object_get_ex(parsed_json, "LOCAL_DIR", &j_local_dir);
   json_object_object_get_ex(parsed_json, "TRACK_FILE", &j_track_file);
   json_object_object_get_ex(parsed_json, "FTP_URL", &j_ftp_url);
-  json_object_object_get_ex(parsed_json, "FTP_USERPWD", &j_ftp_userpwd);
+  json_object_object_get_ex(parsed_json, "FTP_PASSWORD", &j_FTP_PASSWORD);
 
   LOCAL_DIR = strdup(json_object_get_string(j_local_dir));
   TRACK_FILE = strdup(json_object_get_string(j_track_file));
   FTP_URL = strdup(json_object_get_string(j_ftp_url));
-  FTP_USERPWD = strdup(json_object_get_string(j_ftp_userpwd));
+  FTP_PASSWORD = strdup(json_object_get_string(j_FTP_PASSWORD));
 
   json_object_put(parsed_json);
 }
@@ -77,7 +77,7 @@ int upload_file(const char *filepath, const char *filename) {
     char url[1024];
     snprintf(url, sizeof(url), "%s%s", FTP_URL, filename);
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_USERPWD, FTP_USERPWD);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, FTP_PASSWORD);
     FILE *hd_src = fopen(filepath, "rb");
     if (!hd_src) {
       curl_easy_cleanup(curl);
