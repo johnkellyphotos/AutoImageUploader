@@ -118,24 +118,6 @@ int upload_file(const char *filepath, const char *filename)
     return success;
 }
 
-void download_folder(const char *folder) 
-{
-    pid_t pid = fork();
-
-    if (pid == 0)
-    {
-        char filepath[512];
-        snprintf(filepath, sizeof(filepath), "%s/%%f_%%Y%%m%%d-%%H%%M%%S.jpg", LOCAL_DIR);
-        execlp("gphoto2", "gphoto2", "--get-all-files", "--new", "--skip-existing", "--folder", folder, "--filename", filepath, NULL);
-        _exit(1);
-    } 
-    else if (pid > 0) 
-    {
-        int status;
-        waitpid(pid, &status, 0);
-    }
-}
-
 void download_existing_files() 
 {
     FILE *fp = popen("gphoto2 --list-folders", "r");
