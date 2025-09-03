@@ -15,6 +15,18 @@ const char *FTP_USERPWD;
 
 // compile with: `gcc main.c -o uploader -lcurl -ljson-c`
 
+char *get_import_directory() 
+{
+    static char import_dir[1060];
+    char cwd[1024];
+
+    getcwd(cwd, sizeof(cwd));
+    snprintf(import_dir, sizeof(import_dir), "%s/import", cwd); // creates a new folder to store imported photos in
+    mkdir(import_dir, 0755); // makes the directory, if it doesn't already exist
+
+    return import_dir;
+}
+
 void load_config() 
 {
     const char *config_path = "./config.json";
@@ -37,14 +49,16 @@ void load_config()
     struct json_object *parsed_json = json_tokener_parse(data);
     free(data);
 
-    struct json_object *j_local_dir, *j_track_file, *j_ftp_url, *j_ftp_userpwd;
-    json_object_object_get_ex(parsed_json, "LOCAL_DIR", &j_local_dir);
-    json_object_object_get_ex(parsed_json, "TRACK_FILE", &j_track_file);
+    struct json_object *j_track_file, *j_ftp_url, *j_ftp_userpwd;
+
     json_object_object_get_ex(parsed_json, "FTP_URL", &j_ftp_url);
     json_object_object_get_ex(parsed_json, "FTP_USERPWD", &j_ftp_userpwd);
 
-    LOCAL_DIR = strdup(json_object_get_string(j_local_dir));
-    TRACK_FILE = strdup(json_object_get_string(j_track_file));
+    LOCAL_DIR = get_import_directory();;
+
+    char *track_buf = malloc(strlen(LOCAL_DIR) + strlen(".uploaded") + 1);
+    sprintf(track_buf, "%s.uploaded", LOCAL_DIR);
+
     FTP_URL = strdup(json_object_get_string(j_ftp_url));
     FTP_USERPWD = strdup(json_object_get_string(j_ftp_userpwd));
 
@@ -183,18 +197,6 @@ void download_existing_files()
     pclose(fp);
 }
 
-char *get_import_directory() 
-{
-    static char import_dir[1060];
-    char cwd[1024];
-
-    getcwd(cwd, sizeof(cwd));
-    snprintf(import_dir, sizeof(import_dir), "%s/import", cwd); // creates a new folder to store imported photos in
-    mkdir(import_dir, 0755); // makes the directory, if it doesn't already exist
-
-    return import_dir;
-}
-
 int main(int argc, char *argv[]) 
 {
     load_config();
@@ -210,8 +212,6 @@ int main(int argc, char *argv[])
 
     pid_t gphoto_pid = -1;
 
-    char *import_dir = get_import_directory();
-
     while (1) 
     {
         if (gphoto_pid <= 0) 
@@ -222,7 +222,7 @@ int main(int argc, char *argv[])
             if (gphoto_pid == 0) 
             {
                 char filename[1100];
-                snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", import_dir);
+                snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
                 execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL);
                 _exit(1);
             }
