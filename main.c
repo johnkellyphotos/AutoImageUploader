@@ -13,6 +13,8 @@ const char *TRACK_FILE;
 const char *FTP_URL;
 const char *FTP_USERPWD;
 
+// compile with: `gcc main.c -o uploader -lcurl -ljson-c`
+
 void load_config() 
 {
     const char *config_path = "./config.json";
