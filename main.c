@@ -54,7 +54,7 @@ void load_config()
     json_object_object_get_ex(parsed_json, "FTP_URL", &j_ftp_url);
     json_object_object_get_ex(parsed_json, "FTP_USERPWD", &j_ftp_userpwd);
 
-    LOCAL_DIR = get_import_directory();;
+    LOCAL_DIR = get_import_directory();
 
     char *track_buf = malloc(strlen(LOCAL_DIR) + strlen(".uploaded") + 1);
     sprintf(track_buf, "%s.uploaded", LOCAL_DIR);
