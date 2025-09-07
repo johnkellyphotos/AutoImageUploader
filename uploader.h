@@ -14,25 +14,7 @@ const char *TRACK_FILE = ".track.txt";
 const char *FTP_URL;
 const char *FTP_USERPWD;
 
-// compile with: `gcc main.c -o uploader -lcurl -ljson-c`
-
-void _log(const char *note) 
-{
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    char buf[64];
-
-    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", t);
-
-    FILE *f = fopen("log.txt", "a");
-
-    if (f) {
-        fprintf(f, "[%s] %s\n", buf, note);
-        fclose(f);
-    }
-}
-
-void _logf(const char *fmt, ...) 
+void _log(const char *fmt, ...) 
 {
     va_list args;
     va_start(args, fmt);
@@ -43,7 +25,18 @@ void _logf(const char *fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    _log(buf);
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", t);
+
+    FILE *f = fopen("log.txt", "a");
+
+    if (f)
+    {
+        fprintf(f, "[%s] %s\n", buf, fmt);
+        fclose(f);
+    }
 }
 
 char *get_import_directory() 
@@ -127,12 +120,12 @@ void mark_uploaded(const char *filename)
     FILE *f = fopen(TRACK_FILE, "a");
     if (!f)
     {
-        _logf("Unable to log upload in track file (%s) for %s.", TRACK_FILE, filename);
+        _log("Unable to log upload in track file (%s) for %s.", TRACK_FILE, filename);
         return;
     }
     fprintf(f, "%s\n", filename);
     fclose(f);
-    _logf("Tracked upload for %s in track file.", filename);
+    _log("Tracked upload for %s in track file.", filename);
 }
 
 int upload_file(const char *filepath, const char *filename) 
@@ -149,7 +142,7 @@ int upload_file(const char *filepath, const char *filename)
 
         if (!hd_src) 
         {
-            _logf("Failed to open file: %s.", filepath);
+            _log("Failed to open file: %s.", filepath);
             curl_easy_cleanup(curl);
             return 0;
         }
@@ -159,7 +152,7 @@ int upload_file(const char *filepath, const char *filename)
 
         if (curl_easy_perform(curl) == CURLE_OK)
         {
-            _logf("FTP of file complete for image %s to %s.", filepath, FTP_URL);
+            _log("FTP of file complete for image %s to %s.", filepath, FTP_URL);
             success = 1;
         }
 
@@ -222,7 +215,7 @@ void download_existing_files()
         pid_t pid = fork();
         if (pid == 0) 
         {
-            _logf("Getting all files from device at %s...", fullpath);
+            _log("Getting all files from device at %s...", fullpath);
 
             char filepath[512];
             snprintf(filepath, sizeof(filepath), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
@@ -263,151 +256,11 @@ int camera_present()
             if (last_space) *last_space = 0;
 
             strncpy(camera_name, line, sizeof(camera_name) - 1);
-            _logf("Detected camera: %s", camera_name);
+            _log("Detected camera: %s", camera_name);
             break;
         }
     }
 
     pclose(fp);
     return found;
-}
-
-int main(int argc, char *argv[]) 
-{
-    _log("Program start.");
-    load_config();
-    _log("Configuration complete.");
-
-    if (argc > 1 && strcmp(argv[1], "--reset") == 0) 
-    {
-        _log("Attempting to clear track file...");
-        FILE *f = fopen(TRACK_FILE, "w");
-        if (f)
-        {
-            fclose(f); // truncate file to empty
-            _log("Track file cleared.");
-        }
-        else
-        {
-            _log("Failed to clear track file.");
-        }
-    }
-
-    pid_t gphoto_pid = -1;
-
-    while (1) 
-    {
-        if (gphoto_pid <= 0) 
-        {
-            if (!camera_present()) 
-            {
-                _log("No camera detected. Waiting 2s before retry.");
-                sleep(2);
-                continue;
-            }
-
-            download_existing_files();
-
-            gphoto_pid = fork();
-            if (gphoto_pid == 0) 
-            {
-                char filename[1100];
-                snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
-
-                _logf("Saving file from camera to to %s.", filename);
-                execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL); // starts child process to download image
-
-                _logf("Failed to save file from camera to to %s.", filename);
-                _exit(1);
-            }
-            else if (gphoto_pid < 0) 
-            {
-                _log("Failed to fork process. continuing after 2 second wait...");
-                perror("fork failed for wait-event-and-download");
-                sleep(2);
-                continue;
-            }
-        }
-
-        int status;
-        pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
-        if (ret > 0) 
-        {
-            if (WIFEXITED(status)) 
-            {
-                int code = WEXITSTATUS(status);
-                if (code == 0) 
-                {
-                    _log("Task completed and exited cleanly (process done).");
-                }
-                 else if (code == 1) 
-                 {
-                    _log("Task completed (likely no more events / camera removed).");
-                }
-                else
-                {
-                    _logf("gphoto2 exited with error code %d (likely camera disconnect).", code);
-                }
-            } 
-            else if (WIFSIGNALED(status)) 
-            {
-                int sig = WTERMSIG(status);
-                _logf("gphoto2 terminated by signal %d (likely camera disconnect).", sig);
-            }
-
-            gphoto_pid = -1;
-            sleep(2);
-        }
-
-        DIR *d = opendir(LOCAL_DIR);
-        if (d) 
-        {
-            struct dirent *dir;
-            while ((dir = readdir(d)) != NULL) 
-            {
-                if (dir->d_type != DT_REG)
-                {
-                    continue;
-                }
-
-                const char *ext = strrchr(dir->d_name, '.');
-                
-                if (!ext || (strcmp(ext, ".jpg") != 0 && strcmp(ext, ".JPG") != 0))
-                {
-                    _logf("Skipping upload of non JPEG image: %s because it is extension type: %s.", dir->d_name, ext ? ext : "(none)");
-                    continue;
-                }
-
-                if (is_uploaded(dir->d_name))
-                {
-                    _logf("Skipping upload of %s because it marked as uploaded in track file.", dir->d_name);
-                    continue;
-                }
-
-                char path[1024];
-                snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
-
-                _logf("Attempting to upload file: %s.", dir->d_name);
-                if (upload_file(path, dir->d_name))
-                {
-                    _log("Upload complete.");
-                    mark_uploaded(dir->d_name);
-                }
-                else
-                {
-                    _logf("Upload failed for file: %s.", dir->d_name);
-                }
-            }
-
-            closedir(d);
-        }
-        else
-        {
-            _logf("Failed to open directory %s.", LOCAL_DIR);
-        }
-
-        sleep(2);
-    }
-
-    return 0;
 }

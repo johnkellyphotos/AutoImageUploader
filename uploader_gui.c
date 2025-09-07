@@ -2,49 +2,11 @@
 #include <SDL2/SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <string.h>
 #include <pthread.h>
 
-#define MAX_NETWORKS 32
-#define MAX_PASSWORD 128
-#define MAX_CMD 512
-
-volatile int networks_ready = 0;
-
-int selected_network = -1;
-
-int net_count = 0;
-
-typedef struct
-{
-    char ssid[128];
-} WifiNetwork;
-
-WifiNetwork networks[MAX_NETWORKS];
-
-typedef struct
-{
-    int imported;
-    int uploaded;
-    int status; // 0 = waiting, 1 = importing, 2 = uploading
-} ImageStatus;
-
-typedef struct
-{
-    int x, y, w, h;
-    const char *label;
-} Button;
-
-typedef enum
-{ 
-    SCREEN_MAIN, 
-    SCREEN_CONFIG 
-} Screen;
-
-volatile sig_atomic_t stop_requested = 0;
-
-Screen current_screen = SCREEN_MAIN;
+#include "ui.h"
+#include "uploader.h"
 
 void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) 
 {
@@ -404,7 +366,7 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_s
     SDL_DestroyTexture(texture);
 }
 
-void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *status)
+void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *image_status)
 {
     int w, h;
     SDL_GetRendererOutputSize(renderer, &w, &h);
@@ -413,9 +375,9 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *stat
     int spacing = w / 50;
 
     char imported_text[64];
-    snprintf(imported_text, sizeof(imported_text), "%i image%s imported", status->imported, status->imported == 1 ? "" : "s");
+    snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");
     char uploaded_text[64];
-    snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", status->uploaded, status->uploaded == 1 ? "" : "s");
+    snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", image_status->uploaded, image_status->uploaded == 1 ? "" : "s");
 
     int y_offset = 50;
     render_text(renderer, font, imported_text, margin, y_offset);
@@ -424,14 +386,16 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *stat
     render_text(renderer, font, uploaded_text, margin, y_offset);
     y_offset += h / 30 + 10;
 
-    const char *status_str = (status->status == 0) ? "Waiting for images" :
-                             (status->status == 1) ? "Importing images" : "Uploading images";
+    const char *status_str = (image_status->status == 0) ? "Waiting for images" :
+                             (image_status->status == 1) ? "Importing images" : "Uploading images";
 
     render_text(renderer, font, status_str, margin, y_offset);
 }
 
 int main() 
 {
+    _log("Program start.");
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) 
     { 
         printf("SDL Init Error: %s\n", SDL_GetError()); 
@@ -469,13 +433,130 @@ int main()
         return 1; 
     }
 
-    ImageStatus status = {0, 0, 0};
+    ImageStatus image_status = {0, 0, 0};
     SDL_Event e;
 
     signal(SIGINT, handle_sigint);
 
+    load_config();
+
+    pid_t gphoto_pid = -1; // process ID for gphoto2
+
+    _log("Initialization complete.");
+
     while (!stop_requested) 
     {
+        if (gphoto_pid <= 0) 
+        {
+            if (!camera_present()) 
+            {
+                _log("No camera detected. Waiting 2s before retry.");
+            }
+            else
+            {
+                download_existing_files();
+
+                gphoto_pid = fork();
+                if (gphoto_pid == 0) 
+                {
+                    char filename[1100];
+                    snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
+
+                    _log("Saving file from camera to to %s.", filename);
+                    execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL); // starts child process to download image
+
+                    _log("Failed to save file from camera to to %s.", filename);
+                    _exit(1);
+                }
+                else if (gphoto_pid < 0) 
+                {
+                    _log("Failed to fork process. continuing after 2 second wait...");
+                    perror("fork failed for wait-event-and-download");
+                    continue;
+                }
+            }
+        }
+
+        int status;
+        pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
+        if (ret == -1) {
+            perror("waitpid failed");
+            gphoto_pid = -1;
+        }
+        else if (ret > 0) 
+        {
+            if (WIFEXITED(status)) 
+            {
+                int code = WEXITSTATUS(status);
+                if (code == 0) 
+                {
+                    _log("Task completed and exited cleanly (process done).");
+                }
+                 else if (code == 1) 
+                 {
+                    _log("Task completed (likely no more events / camera removed).");
+                }
+                else
+                {
+                    _log("gphoto2 exited with error code %d (likely camera disconnect).", code);
+                }
+            } 
+            else if (WIFSIGNALED(status)) 
+            {
+                int sig = WTERMSIG(status);
+                _log("gphoto2 terminated by signal %d (likely camera disconnect).", sig);
+            }
+
+            gphoto_pid = -1;
+        }
+
+        DIR *d = opendir(LOCAL_DIR);
+        if (d) 
+        {
+            struct dirent *dir;
+            while ((dir = readdir(d)) != NULL) 
+            {
+                if (dir->d_type != DT_REG)
+                {
+                    continue;
+                }
+
+                const char *ext = strrchr(dir->d_name, '.');
+                
+                if (!ext || (strcmp(ext, ".jpg") != 0 && strcmp(ext, ".JPG") != 0))
+                {
+                    _log("Skipping upload of non JPEG image: %s because it is extension type: %s.", dir->d_name, ext ? ext : "(none)");
+                    continue;
+                }
+
+                if (is_uploaded(dir->d_name))
+                {
+                    _log("Skipping upload of %s because it marked as uploaded in track file.", dir->d_name);
+                    continue;
+                }
+
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
+
+                _log("Attempting to upload file: %s.", dir->d_name);
+                if (upload_file(path, dir->d_name))
+                {
+                    _log("Upload complete.");
+                    mark_uploaded(dir->d_name);
+                }
+                else
+                {
+                    _log("Upload failed for file: %s.", dir->d_name);
+                }
+            }
+
+            closedir(d);
+        }
+        else
+        {
+            _log("Failed to open directory %s.", LOCAL_DIR);
+        }
+
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
@@ -530,7 +611,7 @@ int main()
         switch (current_screen)
         {
             case SCREEN_MAIN:
-                render_status_box(renderer, font, &status);
+                render_status_box(renderer, font, &image_status);
                 render_buttons(renderer, font, buttons, 2);
             break;
 
@@ -572,9 +653,9 @@ int main()
         SDL_Delay(500); // app refresh rate, 500ms
 
         // Example progression - remove after testing
-        status.imported += 1;
-        status.uploaded += (status.status == 2) ? 1 : 0;
-        status.status = (status.status + 1) % 3;
+        image_status.imported += 1;
+        image_status.uploaded += (image_status.status == 2) ? 1 : 0;
+        image_status.status = (image_status.status + 1) % 3;
     }
 
     if (font)
