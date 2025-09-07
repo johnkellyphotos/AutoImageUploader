@@ -16,24 +16,28 @@ int selected_network = -1;
 
 int net_count = 0;
 
-typedef struct {
+typedef struct
+{
     char ssid[128];
 } WifiNetwork;
 
 WifiNetwork networks[MAX_NETWORKS];
 
-typedef struct {
+typedef struct
+{
     int imported;
     int uploaded;
     int status; // 0 = waiting, 1 = importing, 2 = uploading
 } ImageStatus;
 
-typedef struct {
+typedef struct
+{
     int x, y, w, h;
     const char *label;
 } Button;
 
-typedef enum { 
+typedef enum
+{ 
     SCREEN_MAIN, 
     SCREEN_CONFIG 
 } Screen;
@@ -42,7 +46,8 @@ volatile sig_atomic_t stop_requested = 0;
 
 Screen current_screen = SCREEN_MAIN;
 
-void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) {
+void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) 
+{
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *surface = TTF_RenderText_Solid(font, text, white);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -52,34 +57,47 @@ void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x
     SDL_DestroyTexture(texture);
 }
 
-int list_networks(WifiNetwork networks[], int max) {
+int list_networks(WifiNetwork networks[], int max)
+{
     FILE *fp = popen("nmcli -t -f SSID dev wifi", "r");
-    if (!fp) return 0;
+    if (!fp)
+    {
+        return 0;
+    }
+
     int count = 0;
     char line[256];
-    while (fgets(line, sizeof(line), fp) && count < max) {
+
+    while (fgets(line, sizeof(line), fp) && count < max)
+    {
         line[strcspn(line, "\n")] = 0;
-        if (strlen(line) > 0) {
+        if (strlen(line) > 0)
+        {
             strncpy(networks[count].ssid, line, sizeof(networks[count].ssid));
             networks[count].ssid[sizeof(networks[count].ssid)-1] = 0;
             count++;
         }
     }
+
     pclose(fp);
     return count;
 }
 
-void* scan_networks_thread(void* arg) {
+void* scan_networks_thread(void* arg)
+{
     net_count = list_networks(networks, MAX_NETWORKS);
     networks_ready = 1;
     return NULL;
 }
-int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[], int net_count) {
+
+int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[], int net_count)
+{
     int selected = -1;
     SDL_Event e;
     SDL_Rect net_rects[MAX_NETWORKS];
 
-    while (!stop_requested && selected == -1) {
+    while (!stop_requested && selected == -1)
+    {
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
@@ -88,13 +106,16 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
         int mx, my;
         SDL_GetMouseState(&mx, &my);
 
-        for (int i = 0; i < net_count; i++) {
+        for (int i = 0; i < net_count; i++)
+        {
             SDL_Rect r = {50, 50 + i * 40, 220, 30};
             net_rects[i] = r;
 
             SDL_Color bg = {40, 40, 40, 255};
             if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h)
+            {
                 bg = (SDL_Color){70, 70, 70, 255};
+            }
 
             SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, 255);
             SDL_RenderFillRect(renderer, &r);
@@ -112,13 +133,21 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 
         SDL_RenderPresent(renderer);
 
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) return -1;
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+        while (SDL_PollEvent(&e))
+        {
+            if (e.type == SDL_QUIT)
+            {
+                return -1;
+            }
+
+            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
+            {
                 int mx = e.button.x, my = e.button.y;
-                for (int i = 0; i < net_count; i++) {
+                for (int i = 0; i < net_count; i++)
+                {
                     if (mx >= net_rects[i].x && mx <= net_rects[i].x + net_rects[i].w &&
-                        my >= net_rects[i].y && my <= net_rects[i].y + net_rects[i].h) {
+                        my >= net_rects[i].y && my <= net_rects[i].y + net_rects[i].h)
+                    {
                         selected = i;
                         break;
                     }
@@ -133,13 +162,15 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 }
 
 
-void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len) {
+void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
+{
     SDL_StartTextInput();
     int done = 0;
     SDL_Event e;
     password[0] = 0;
 
-    while (!done && !stop_requested) {
+    while (!done && !stop_requested)
+    {
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
@@ -150,38 +181,59 @@ void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, ch
 
         SDL_RenderPresent(renderer);
 
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) stop_requested = 1;
-            if (e.type == SDL_TEXTINPUT) {
+        while (SDL_PollEvent(&e))
+        {
+            if (e.type == SDL_QUIT)
+            {
+                stop_requested = 1;
+            }
+
+            if (e.type == SDL_TEXTINPUT)
+            {
                 strncat(password, e.text.text, max_len - strlen(password) - 1);
             }
-            if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.sym == SDLK_RETURN) done = 1;
-                if (e.key.keysym.sym == SDLK_BACKSPACE) {
+
+            if (e.type == SDL_KEYDOWN)
+            {
+                if (e.key.keysym.sym == SDLK_RETURN)
+                {
+                    done = 1;
+                }
+
+                if (e.key.keysym.sym == SDLK_BACKSPACE)
+                {
                     int len = strlen(password);
-                    if (len > 0) password[len-1] = 0;
+                    if (len > 0)
+                    {
+                        password[len-1] = 0;
+                    }
                 }
             }
         }
     }
+
     SDL_StopTextInput();
 }
 
-void connect_to_network(const char *ssid, const char *password) {
+void connect_to_network(const char *ssid, const char *password)
+{
     char cmd[MAX_CMD];
     snprintf(cmd, sizeof(cmd), "nmcli device wifi connect '%s' password '%s' &", ssid, password);
     system(cmd);
 }
 
-int mouse_over_button(Button *btn, int mx, int my) {
+int mouse_over_button(Button *btn, int mx, int my)
+{
     return mx >= btn->x && mx <= btn->x + btn->w && my >= btn->y && my <= btn->y + btn->h;
 }
 
-void handle_sigint(int sig) {
+void handle_sigint(int sig)
+{
     stop_requested = 1;
 }
 
-void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn) {
+void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn)
+{
     SDL_Rect rect = {btn->x, btn->y, btn->w, btn->h};
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
     SDL_RenderFillRect(renderer, &rect);
@@ -202,12 +254,13 @@ void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn) {
     SDL_DestroyTexture(texture);
 }
 
-void setup_config_buttons(int screen_w, int screen_h, Button *back_button) {
+void setup_config_buttons(int screen_w, int screen_h, Button *back_button)
+{
     int margin = screen_w / 50;
     int spacing = screen_w / 50;
     int btn_w = (screen_w - margin*2 - spacing) / 2;
     int btn_h = screen_h / 15;
-    int y = screen_h - btn_h - margin;   // same as main buttons
+    int y = screen_h - btn_h - margin;
 
     back_button->x = margin;
     back_button->y = y;
@@ -216,13 +269,16 @@ void setup_config_buttons(int screen_w, int screen_h, Button *back_button) {
     back_button->label = "Back";
 }
 
-void render_buttons(SDL_Renderer *renderer, TTF_Font *font, Button buttons[], int count) {
-    for (int i = 0; i < count; i++) {
+void render_buttons(SDL_Renderer *renderer, TTF_Font *font, Button buttons[], int count)
+{
+    for (int i = 0; i < count; i++)
+    {
         render_button(renderer, font, &buttons[i]);
     }
 }
 
-void setup_buttons(int screen_w, int screen_h, Button buttons[], int count) {
+void setup_buttons(int screen_w, int screen_h, Button buttons[], int count)
+{
     int margin = screen_w / 50;
     int spacing = screen_w / 50;
     int btn_w = (screen_w - margin*2 - spacing) / 2;
@@ -242,31 +298,44 @@ void setup_buttons(int screen_w, int screen_h, Button buttons[], int count) {
     buttons[1].label = "Clear imports";
 }
 
-void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_height, int total_width, int strength_percent) {
+void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_height, int total_width, int strength_percent)
+{
     int bars = 4;
     int bar_spacing = total_width / 10;
     int bar_width = (total_width - (bars - 1) * bar_spacing) / bars;
 
     SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
-    for (int i = 0; i < bars; i++) {
+    for (int i = 0; i < bars; i++)
+    {
         int bar_height = ((i + 1) * total_height) / bars;
         SDL_Rect bg = { x + i * (bar_width + bar_spacing), y + total_height - bar_height, bar_width, bar_height };
         SDL_RenderFillRect(renderer, &bg);
     }
 
     int active_bars = (strength_percent * bars) / 100;
-    if (active_bars > bars) active_bars = bars;
+    if (active_bars > bars)
+    {
+        active_bars = bars;
+    }
+
     SDL_SetRenderDrawColor(renderer, 0, 200, 0, 255);
-    for (int i = 0; i < active_bars; i++) {
+
+    for (int i = 0; i < active_bars; i++)
+    {
         int bar_height = ((i + 1) * total_height) / bars;
         SDL_Rect fg = { x + i * (bar_width + bar_spacing), y + total_height - bar_height, bar_width, bar_height };
         SDL_RenderFillRect(renderer, &fg);
     }
 }
 
-int get_link_strength() {
+int get_link_strength()
+{
     FILE *f = fopen("/proc/net/wireless", "r");
-    if (!f) return 0;
+    if (!f)
+    {
+        return 0;
+    }
+
     char line[256];
     fgets(line, sizeof(line), f);
     fgets(line, sizeof(line), f);
@@ -274,16 +343,27 @@ int get_link_strength() {
     sscanf(line + 29, "%f", &link);
     fclose(f);
     int strength = (int)(link * 100 / 70);
-    if (strength > 100) strength = 100;
-    if (strength < 0) strength = 0;
+
+    if (strength > 100)
+    {
+        strength = 100;
+    }
+
+    if (strength < 0)
+    {
+        strength = 0;
+    }
+
     return strength;
 }
 
-int internet_connected() {
+int internet_connected()
+{
     return system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0;
 }
 
-void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_strength) {
+void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_strength)
+{
     SDL_Color white = {255, 255, 255, 255};
     const char *status_text = internet_connected() ? "Connected" : "Not connected";
 
@@ -308,7 +388,8 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_s
     SDL_DestroyTexture(texture);
 }
 
-void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *status) {
+void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *status)
+{
     int w, h;
     SDL_GetRendererOutputSize(renderer, &w, &h);
 
@@ -320,9 +401,10 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *stat
     char uploaded_text[64];
     snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", status->uploaded, status->uploaded == 1 ? "" : "s");
 
-    int y_offset = 50; // leave top space for connection status
+    int y_offset = 50;
     render_text(renderer, font, imported_text, margin, y_offset);
     y_offset += h / 30 + 5;
+
     render_text(renderer, font, uploaded_text, margin, y_offset);
     y_offset += h / 30 + 10;
 
