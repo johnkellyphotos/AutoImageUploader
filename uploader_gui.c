@@ -100,8 +100,15 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
     {
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-        render_text(renderer, font, "Select Wi-Fi network:", 50, 50);
+        SDL_Color white = {255, 255, 255, 255};
+        SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
+        SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
+        SDL_Rect title_rect = {50, 10, title_surf->w, title_surf->h};
+        SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
+        SDL_FreeSurface(title_surf);
+        SDL_DestroyTexture(title_tex);
 
         int mx, my;
         SDL_GetMouseState(&mx, &my);
@@ -160,7 +167,6 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 
     return selected;
 }
-
 
 void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
 {
@@ -259,7 +265,7 @@ void setup_config_buttons(int screen_w, int screen_h, Button *back_button)
     int margin = screen_w / 50;
     int spacing = screen_w / 50;
     int btn_w = (screen_w - margin*2 - spacing) / 2;
-    int btn_h = screen_h / 15;
+    int btn_h = screen_h / 5;
     int y = screen_h - btn_h - margin;
 
     back_button->x = margin;
@@ -282,7 +288,7 @@ void setup_buttons(int screen_w, int screen_h, Button buttons[], int count)
     int margin = screen_w / 50;
     int spacing = screen_w / 50;
     int btn_w = (screen_w - margin*2 - spacing) / 2;
-    int btn_h = screen_h / 15;
+    int btn_h = screen_h / 5;
     int y = screen_h - btn_h - margin;
 
     buttons[0].x = margin;
@@ -327,9 +333,9 @@ void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_hei
         SDL_RenderFillRect(renderer, &fg);
     }
 }
-
+    
 int get_link_strength()
-{
+    {
     FILE *f = fopen("/proc/net/wireless", "r");
     if (!f)
     {
@@ -339,8 +345,16 @@ int get_link_strength()
     char line[256];
     fgets(line, sizeof(line), f);
     fgets(line, sizeof(line), f);
-    float link = 0;
-    sscanf(line + 29, "%f", &link);
+    fgets(line, sizeof(line), f);
+
+    char iface[16];
+    float status, link, level, noise;
+    if (sscanf(line, " %15[^:]: %f %f %f %f %f %f", iface, &status, &link, &level, &noise, &noise, &noise) < 4)
+    {
+        fclose(f);
+        return 0;
+    }
+
     fclose(f);
     int strength = (int)(link * 100 / 70);
 
@@ -364,20 +378,22 @@ int internet_connected()
 
 void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_strength)
 {
-    SDL_Color white = {255, 255, 255, 255};
-    const char *status_text = internet_connected() ? "Connected" : "Not connected";
+    SDL_Color font_color = internet_connected() 
+        ? (SDL_Color){55, 255, 55, 255} 
+        : (SDL_Color){255, 0, 0, 255};
+    const char *status_text = internet_connected() ? "Internet connected" : "No internet";
 
-    int w, h;
-    SDL_GetRendererOutputSize(renderer, &w, &h);
+    int screen_width, screen_height;
+    SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
 
-    SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, white);
+    SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    int bar_size = (int)(surface->h * 0.8);
+    int bar_size = (int)(surface->h * 0.66);
     int spacing = 10;
     int total_width = surface->w + spacing + bar_size;
-    int start_x = w - total_width - 10;
-    int y_pos = 11;
+    int start_x = screen_width - total_width - 10;
+    int y_pos = 10;
 
     SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
@@ -441,7 +457,7 @@ int main()
     Button buttons[2]; // main screen buttons
     setup_buttons(screen_width, screen_height, buttons, 2);
 
-    int font_size = screen_height / 30;
+    int font_size = screen_height / 20;
     TTF_Font *font = TTF_OpenFont("Rubik/Rubik-VariableFont_wght.ttf", font_size);
     if (!font)
     {
@@ -508,11 +524,12 @@ int main()
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
+        int strength = get_link_strength();
+        render_connection_status(renderer, font, strength);
+
         switch (current_screen)
         {
             case SCREEN_MAIN:
-                int strength = get_link_strength();
-                render_connection_status(renderer, font, strength);
                 render_status_box(renderer, font, &status);
                 render_buttons(renderer, font, buttons, 2);
             break;
