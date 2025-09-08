@@ -9,6 +9,7 @@ volatile int camera_found = 0;
 volatile int link_strength_value = 0;
 volatile int internet_up = 0;
 
+#include "log.h"
 #include "ui.h"
 #include "uploader.h"
 
@@ -76,7 +77,7 @@ int main()
     pthread_create(&worker, NULL, import_upload_worker, &image_status);
 
     pthread_t cam_thread;
-    pthread_create(&cam_thread, NULL, camera_poll_thread, NULL);
+    // pthread_create(&cam_thread, NULL, camera_poll_thread, NULL);
 
     pthread_t link_strength;
     pthread_create(&link_strength, NULL, link_poll_thread, NULL);
@@ -85,10 +86,6 @@ int main()
     pthread_create(&internet_is_up, NULL, internet_poll_thread, NULL);
 
     SDL_Event e;
-
-    Camera *camera = NULL;
-    GPContext *context = gp_context_new();
-    int camera_initialized = 0;
 
     while (!stop_requested) 
     {
