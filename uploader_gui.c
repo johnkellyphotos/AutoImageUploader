@@ -55,12 +55,11 @@ int main()
 
     _log("Initialization complete.");
 
+    pthread_t worker;
+    pthread_create(&worker, NULL, import_upload_worker, &image_status);
+
     while (!stop_requested) 
     {
-        pthread_t worker;
-        pthread_create(&worker, NULL, import_upload_worker, &image_status);
-        pthread_detach(worker);
-
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 

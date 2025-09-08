@@ -14,6 +14,8 @@ const char *TRACK_FILE = ".track.txt";
 const char *FTP_URL;
 const char *FTP_USERPWD;
 
+pthread_mutex_t track_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void _log(const char *fmt, ...) 
 {
     va_list args;
@@ -36,6 +38,60 @@ void _log(const char *fmt, ...)
         fprintf(f, "[%s] %s\n", timestamp, msg);
         fclose(f);
     }
+}
+
+int count_uploaded_images()
+{
+    FILE *f = fopen(TRACK_FILE, "r");
+    if (!f)
+    {
+        return 0;
+    }
+
+    int count = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) 
+    {
+        line[strcspn(line, "\n")] = 0;
+        if (strlen(line) > 0)
+        {
+            count++;
+        }
+    }
+
+    fclose(f);
+    return count;
+}
+
+int count_imported_images()
+{
+    int count = 0;
+    DIR *d = opendir(LOCAL_DIR);
+    if (!d)
+    {
+        return 10;
+    }
+
+    struct dirent *dir;
+    while ((dir = readdir(d)) != NULL) 
+    {
+        if (dir->d_type != DT_REG)
+        {
+            continue;
+        }
+        const char *ext = strrchr(dir->d_name, '.');
+        if (!ext)
+        {
+            continue;
+        }
+        if (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg"))
+        {
+            count++;
+        }
+    }
+
+    closedir(d);
+    return 5 + count;
 }
 
 char *get_import_directory() 
@@ -93,38 +149,49 @@ void load_config()
 
 int is_uploaded(const char *filename) 
 {
+    pthread_mutex_lock(&track_file_mutex);
+
     FILE *f = fopen(TRACK_FILE, "r");
-    if (!f)
+    if (!f) 
     {
+        pthread_mutex_unlock(&track_file_mutex);
         return 0;
     }
 
     char line[512];
-    
+    int found = 0;
     while (fgets(line, sizeof(line), f)) 
     {
         line[strcspn(line, "\n")] = 0;
         if (strcmp(line, filename) == 0) 
         {
-            fclose(f);
-            return 1;
+            found = 1;
+            break;
         }
     }
+
     fclose(f);
-    return 0;
+    pthread_mutex_unlock(&track_file_mutex);
+    return found;
 }
 
 void mark_uploaded(const char *filename) 
 {
+    pthread_mutex_lock(&track_file_mutex);
+
     FILE *f = fopen(TRACK_FILE, "a");
-    if (!f)
+    if (f) 
+    {
+        fprintf(f, "%s\n", filename);
+        fclose(f);
+        _log("Tracked upload for %s in track file.", filename);
+    } 
+    else 
     {
         _log("Unable to log upload in track file (%s) for %s.", TRACK_FILE, filename);
-        return;
     }
-    fprintf(f, "%s\n", filename);
-    fclose(f);
-    _log("Tracked upload for %s in track file.", filename);
+
+    pthread_mutex_unlock(&track_file_mutex);
 }
 
 int upload_file(const char *filepath, const char *filename) 
@@ -269,55 +336,59 @@ void *import_upload_worker(void *arg)
     static pid_t gphoto_pid = -1;
     ImageStatus *image_status = (ImageStatus *)arg;
 
-    if (gphoto_pid <= 0) 
+    while (!stop_requested)
     {
-        if (!camera_present()) 
-        {
-            image_status->status = 0;
-        } 
-        else 
-        {
-            download_existing_files();
-            image_status->imported = 1;
-            image_status->status = 1;
+        image_status->imported = count_imported_images();
+        image_status->uploaded = count_uploaded_images();
 
-            gphoto_pid = fork();
-            if (gphoto_pid == 0) 
+        // Camera download handling
+        if (camera_present())
+        {
+            if (gphoto_pid <= 0)
             {
-                char filename[1100];
-                snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
-                execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL);
-                _exit(1);
+                download_existing_files();
+                image_status->status = 1;
+
+                gphoto_pid = fork();
+                if (gphoto_pid == 0) 
+                {
+                    char filename[1100];
+                    snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
+                    execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL);
+                    _exit(1);
+                }
             }
         }
-    }
 
-    int status;
-    pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
-    if (ret > 0 || ret == -1) gphoto_pid = -1;
+        int status;
+        pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
+        if (ret > 0 || ret == -1) gphoto_pid = -1;
 
-    DIR *d = opendir(LOCAL_DIR);
-    if (d) 
-    {
-        struct dirent *dir;
-        while ((dir = readdir(d)) != NULL) 
+        // Upload loop runs regardless of camera
+        DIR *d = opendir(LOCAL_DIR);
+        if (d) 
         {
-            if (dir->d_type != DT_REG) continue;
-            const char *ext = strrchr(dir->d_name, '.');
-            if (!ext || (strcmp(ext, ".jpg") && strcmp(ext, ".JPG"))) continue;
-            if (is_uploaded(dir->d_name)) continue;
-
-            char path[1024];
-            snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
-            image_status->status = 2;
-            if (upload_file(path, dir->d_name)) 
+            struct dirent *dir;
+            while ((dir = readdir(d)) != NULL) 
             {
-                image_status->uploaded += 1;
-                image_status->status = 0;
-                mark_uploaded(dir->d_name);
+                if (dir->d_type != DT_REG) continue;
+                const char *ext = strrchr(dir->d_name, '.');
+                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg"))) continue;
+                if (is_uploaded(dir->d_name)) continue;
+
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
+                image_status->status = 2;
+                if (upload_file(path, dir->d_name)) 
+                {
+                    image_status->status = 0;
+                    mark_uploaded(dir->d_name);
+                }
             }
+            closedir(d);
         }
-        closedir(d);
+
+        usleep(100000);
     }
 
     return NULL;
