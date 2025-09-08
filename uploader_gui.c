@@ -93,6 +93,29 @@ int main()
             {
                 stop_requested = 1;
             }
+
+            // determine if a button was clicked
+            if (e.type == SDL_MOUSEBUTTONDOWN)
+            {
+                int mx = e.button.x;
+                int my = e.button.y;
+
+                for (int i = 0; i < 2; i++)
+                {
+                    if (mx >= buttons[i].x && mx <= buttons[i].x + buttons[i].w &&
+                        my >= buttons[i].y && my <= buttons[i].y + buttons[i].h)
+                    {
+                        if (current_screen == SCREEN_MAIN)
+                        {
+                            current_screen = SCREEN_CONFIG;
+                        }
+                        else
+                        {
+                            current_screen = SCREEN_MAIN;
+                        }
+                    }
+                }
+            }
         }
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
