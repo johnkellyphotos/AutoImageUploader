@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <spawn.h>
+#include <gphoto2/gphoto2-camera.h>
+#include <gphoto2/gphoto2-context.h>
 
 const char *LOCAL_DIR;
 const char *TRACK_FILE = ".track.txt";
@@ -18,6 +20,7 @@ const char *FTP_USERPWD;
 extern char **environ;
 
 pthread_mutex_t track_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t camera_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void _log(const char *fmt, ...) 
 {
@@ -103,8 +106,13 @@ char *get_import_directory()
     char cwd[1024];
 
     getcwd(cwd, sizeof(cwd));
-    snprintf(import_dir, sizeof(import_dir), "%s/import", cwd); // creates a new folder to store imported photos in
-    mkdir(import_dir, 0755); // makes the directory, if it doesn't already exist
+    snprintf(import_dir, sizeof(import_dir), "%s/import", cwd);
+
+    struct stat st;
+    if (stat(import_dir, &st) != 0 || !S_ISDIR(st.st_mode)) 
+    {
+        mkdir(import_dir, 0755);
+    }
 
     return import_dir;
 }
@@ -236,104 +244,168 @@ int upload_file(const char *filepath, const char *filename)
     return success;
 }
 
-void download_existing_files() 
+void download_existing_files()
 {
     _log("Attempting to download existing images from the camera.");
-    FILE *fp = popen("gphoto2 --list-folders", "r");
-    if (!fp)
+
+    pthread_mutex_lock(&camera_mutex);
+    Camera *camera;
+    GPContext *context = gp_context_new();
+    int ret = gp_camera_new(&camera);
+    if (ret < GP_OK)
     {
-        _log("No camera detected.");
+        _log("Failed to create camera object: %d", ret);
+        pthread_mutex_unlock(&camera_mutex);
         return;
     }
 
-    char line[512];
-    char parent_folder[512] = ""; // track current parent folder
-
-    while (fgets(line, sizeof(line), fp)) 
+    ret = gp_camera_init(camera, context);
+    if (ret < GP_OK)
     {
-        line[strcspn(line, "\n")] = 0;
-
-        // Skip empty lines
-        if (strlen(line) == 0)
+        if (ret == GP_ERROR_MODEL_NOT_FOUND)
         {
-            continue;
+            camera_found = -1;
+            _log("Camera detected but communication with camera failed.");
         }
-
-        char fullpath[1024];
-
-        // Absolute folder
-        if (line[0] == '/') 
+        else if (ret == -53)
         {
-            strcpy(fullpath, line);
-            strcpy(parent_folder, line); // update parent
+            camera_found = -1;
+            _log("Camera detected but the camera is busy.");
         }
-        // Indented/relative folder
-        else if (line[0] == ' ' || line[0] == '-') 
+        else
         {
-            // remove leading spaces or dashes
-            char *trimmed = line;
-            while (*trimmed == ' ' || *trimmed == '-')
-            trimmed++;
-            snprintf(fullpath, sizeof(fullpath), "%s/%s", parent_folder, trimmed);
-        }
-        else 
-        {
-            continue;
-        }
-
-        pid_t pid = fork();
-        if (pid == 0) 
-        {
-            _log("Getting all files from device at %s...", fullpath);
-
-            char filepath[512];
-            snprintf(filepath, sizeof(filepath), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
-
-            execlp("gphoto2", "gphoto2", "--get-all-files", "--new", "--skip-existing", "--folder", fullpath, "--filename", filepath, NULL);
-
-            _exit(1);
-        } 
-        else if (pid > 0) 
-        {
-            int status;
-            waitpid(pid, &status, 0);
+            camera_found = 0;
+            _log("No camera detected or failed to initialize: %d", ret);
+            gp_camera_exit(camera, context);
+            pthread_mutex_unlock(&camera_mutex);
+            return;
         }
     }
+    else
+    {
+        CameraList *folders;
+        gp_list_new(&folders);
 
-    pclose(fp);
-}
+        ret = gp_camera_folder_list_folders(camera, "/", folders, context);
 
-void *camera_poll_thread(void *arg) {
-    while (1) {
-        FILE *fp = popen("gphoto2 --auto-detect", "r");
-        if (!fp) {
-            camera_found = 0;
-            sleep(1);
-            continue;
+        if (ret < GP_OK)
+        {
+            _log("Failed to list folders: %d", ret);
+            gp_list_free(folders);
+            gp_camera_exit(camera, context);
+            pthread_mutex_unlock(&camera_mutex);
+            return;
         }
 
-        char line[512];
-        int found = 0;
+        int folder_count = gp_list_count(folders);
+        for (int i = 0; i < folder_count; i++)
+        {
+            const char *folder;
+            gp_list_get_name(folders, i, &folder);
+            _log("Processing folder: %s", folder);
 
-        fgets(line, sizeof(line), fp);
-        fgets(line, sizeof(line), fp);
+            CameraList *files;
+            gp_list_new(&files);
+            ret = gp_camera_folder_list_files(camera, folder, files, context);
+            if (ret < GP_OK)
+            {
+                _log("Failed to list files in folder %s: %d", folder, ret);
+                gp_list_free(files);
+                continue;
+            }
 
-        while (fgets(line, sizeof(line), fp)) {
-            if (strstr(line, "usb") || strstr(line, "ptp")) {
-                found = 1;
-                break;
+            int file_count = gp_list_count(files);
+            for (int j = 0; j < file_count; j++)
+            {
+                const char *filename;
+                gp_list_get_name(files, j, &filename);
+                _log("Downloading file %s/%s", folder, filename);
+
+                CameraFile *file;
+                gp_file_new(&file);
+                ret = gp_camera_file_get(camera, folder, filename, GP_FILE_TYPE_NORMAL, file, context);
+                if (ret < GP_OK)
+                {
+                    _log("Failed to download %s/%s: %d", folder, filename, ret);
+                    gp_file_free(file);
+                    continue;
+                }
+
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, filename);
+                ret = gp_file_save(file, path);
+                if (ret < GP_OK)
+                {
+                    _log("Failed to save %s: %d", path, ret);
+                }
+                else
+                {
+                    _log("Saved %s", path);
+                }
+
+                gp_file_free(file);
+            }
+
+            gp_list_free(files);
+        }
+            gp_list_free(folders);
+            gp_camera_exit(camera, context);
+    }
+    
+    pthread_mutex_unlock(&camera_mutex);
+}
+
+void *camera_poll_thread(void *arg) 
+{
+    Camera *camera = NULL;
+    GPContext *context = gp_context_new();
+    int camera_initialized = 0;
+
+    while (!stop_requested) 
+    {
+        pthread_mutex_lock(&camera_mutex);
+        if (!camera_initialized) 
+        {
+            if (gp_camera_new(&camera) >= GP_OK && gp_camera_init(camera, context) >= GP_OK) 
+            {
+                camera_found = 1;
+                camera_initialized = 1;
+            } 
+            else 
+            {
+                camera_found = 0;
+                if (camera)
+                {
+                    gp_camera_free(camera); camera = NULL;
+                }
+            }
+        } 
+        else 
+        {
+            // Camera already initialized; optionally poll events
+            CameraEventType event_type;
+            void *event_data = NULL;
+            int ret = gp_camera_wait_for_event(camera, 2000, &event_type, &event_data, context);
+
+            if (ret != GP_OK) 
+            {
+                camera_found = 0;
+                gp_camera_exit(camera, context);
+                gp_camera_free(camera);
+                camera = NULL;
+                camera_initialized = 0;
+            } 
+            else 
+            {
+                camera_found = 1;
             }
         }
 
-        pclose(fp);
-        camera_found = found;
-        sleep(1);  // poll interval
-    }
-    return NULL;
-}
+        pthread_mutex_unlock(&camera_mutex);
 
-#include <spawn.h>
-extern char **environ;
+        sleep(1);
+    }
+}
 
 void *import_upload_worker(void *arg) 
 {
@@ -341,52 +413,69 @@ void *import_upload_worker(void *arg)
 
     _log("Starting upload worker.");
 
-    while (!stop_requested)
+    while (!stop_requested) 
     {
+        download_existing_files();
         image_status->imported = count_imported_images();
         image_status->uploaded = count_uploaded_images();
 
         static time_t last_camera_check = 0;
         time_t now = time(NULL);
 
-        if (now - last_camera_check >= 2)
+        if (now - last_camera_check >= 2) 
         {
             last_camera_check = now;
 
-            if (camera_found && image_status->status != 1)
+            if ((camera_found > 0) && image_status->status != 1) 
             {
+                pthread_mutex_lock(&camera_mutex);
                 _log("Starting camera download process.");
 
-                pid_t pid;
-                char *argv[] = {
-                    "gphoto2",
-                    "--wait-event-and-download",
-                    "--skip-existing",
-                    "--folder", "/",
-                    "--filename", "/tmp/gphoto_%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg",
-                    NULL
-                };
-
-                int ret = posix_spawn(&pid, "/usr/bin/gphoto2", NULL, NULL, argv, environ);
-                if (ret == 0)
+                Camera *camera;
+                GPContext *context = gp_context_new();
+                int ret = gp_camera_new(&camera);
+                if (ret < GP_OK) 
                 {
-                    image_status->status = internet_up ? 1 : 3; // importing w/ or w/o internet
-                }
-                else
+                    _log("Failed to create camera instance.");
+                } 
+                else 
                 {
-                    _log("posix_spawn failed: %d", ret);
-                }
-            }
-        }
+                    ret = gp_camera_init(camera, context);
+                    if (ret < GP_OK) 
+                    {
+                        _log("Failed to initialize camera.");
+                        gp_camera_free(camera);
+                    } 
+                    else 
+                    {
+                        CameraFile *file;
+                        gp_file_new(&file);
 
-        // Non-blocking wait for child
-        if (image_status->status == 1)
-        {
-            int status;
-            pid_t r = waitpid(-1, &status, WNOHANG);
-            if (r > 0)
-            {
-                image_status->status = 0; // waiting
+                        CameraEventType event_type;
+                        void *event_data = NULL;
+                        ret = gp_camera_wait_for_event(camera, 2000, &event_type, &event_data, context);
+
+                        if (event_type == GP_EVENT_FILE_ADDED) 
+                        {
+                            CameraFilePath *path = (CameraFilePath *)event_data;
+                            _log("New file added: %s/%s", path->folder, path->name);
+                        }
+
+                        if (ret == GP_OK) 
+                        {
+                            image_status->status = internet_up ? 1 : 3;
+                        } 
+                        else 
+                        {
+                            _log("Camera event wait failed: %d", ret);
+                        }
+
+                        gp_file_free(file);
+                        gp_camera_exit(camera, context);
+                        gp_camera_free(camera);
+                    }
+                }
+                pthread_mutex_unlock(&camera_mutex);
             }
         }
 
@@ -397,18 +486,18 @@ void *import_upload_worker(void *arg)
             struct dirent *dir;
             while ((dir = readdir(d)) != NULL) 
             {
-                if (dir->d_type != DT_REG)
+                if (dir->d_type != DT_REG) 
                 {
                     continue;
                 }
 
                 const char *ext = strrchr(dir->d_name, '.');
-
-                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg")))
+                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg"))) 
                 {
                     continue;
                 }
-                if (is_uploaded(dir->d_name))
+
+                if (is_uploaded(dir->d_name)) 
                 {
                     continue;
                 }
@@ -423,8 +512,8 @@ void *import_upload_worker(void *arg)
                 }
             }
             closedir(d);
-        }
-        else if (!internet_up && camera_found)
+        } 
+        else if (!internet_up && (camera_found > 0)) 
         {
             image_status->status = 3;
         }

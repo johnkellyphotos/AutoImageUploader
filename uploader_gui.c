@@ -86,6 +86,10 @@ int main()
 
     SDL_Event e;
 
+    Camera *camera = NULL;
+    GPContext *context = gp_context_new();
+    int camera_initialized = 0;
+
     while (!stop_requested) 
     {
         while (SDL_PollEvent(&e)) 

@@ -406,10 +406,33 @@ void* internet_poll_thread(void* arg) {
 
 void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_detected)
 {
-    SDL_Color font_color = camera_detected 
-        ? (SDL_Color){55, 255, 55, 255} 
-        : (SDL_Color){255, 0, 0, 255};
-    const char *status_text = camera_detected ? "Camera detected" : "No camera detected";
+    SDL_Color font_color;
+    switch (camera_detected)
+    {
+        case -1:
+            font_color = (SDL_Color){255, 255, 0, 255};
+            break;
+        case 1:
+            font_color = (SDL_Color){55, 255, 55, 255};
+            break;
+        default:
+            font_color = (SDL_Color){255, 0, 0, 255};
+            break;
+    }
+
+    const char *status_text;
+    switch (camera_detected)
+    {
+        case -1:
+            status_text = "Camera detected - no communication";
+            break;
+        case 1:
+            status_text = "Camera detected";
+            break;
+        default:
+            status_text = "No camera detected";
+            break;
+    }
 
     int screen_width, screen_height;
     SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
