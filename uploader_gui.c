@@ -53,7 +53,7 @@ int main()
     setup_config_buttons(screen_width, screen_height, &back_button);
 
     Button buttons[2];
-    setup_buttons(screen_width, screen_height, buttons, 2);
+    setup_buttons(screen_width, screen_height, buttons);
 
     int font_size = screen_height / 20;
     TTF_Font *font = TTF_OpenFont("Rubik/Rubik-VariableFont_wght.ttf", font_size);
@@ -75,9 +75,6 @@ int main()
 
     pthread_t worker;
     pthread_create(&worker, NULL, import_upload_worker, &image_status);
-
-    pthread_t cam_thread;
-    // pthread_create(&cam_thread, NULL, camera_poll_thread, NULL);
 
     pthread_t link_strength;
     pthread_create(&link_strength, NULL, link_poll_thread, NULL);

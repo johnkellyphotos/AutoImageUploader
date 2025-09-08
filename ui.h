@@ -77,7 +77,7 @@ int list_networks(WifiNetwork networks[], int max)
     return count;
 }
 
-void* scan_networks_thread(void* arg)
+void* scan_networks_thread()
 {
     net_count = list_networks(networks, MAX_NETWORKS);
     networks_ready = 1;
@@ -251,6 +251,7 @@ void kill_camera_users()
 
 void handle_sigint(int sig)
 {
+    _log("Logging signal interrupt: %i", sig);
     stop_requested = 1;
     kill_camera_users();
 }
@@ -300,7 +301,7 @@ void render_buttons(SDL_Renderer *renderer, TTF_Font *font, Button buttons[], in
     }
 }
 
-void setup_buttons(int screen_w, int screen_h, Button buttons[], int count)
+void setup_buttons(int screen_w, int screen_h, Button buttons[])
 {
     int margin = screen_w / 50;
     int spacing = screen_w / 50;
@@ -388,7 +389,7 @@ int get_link_strength()
     return strength;
 }
     
-void* link_poll_thread(void* arg) {
+void* link_poll_thread() {
     while (!stop_requested) {
         link_strength_value = get_link_strength();
         usleep(1000000);
@@ -396,7 +397,7 @@ void* link_poll_thread(void* arg) {
     return NULL;
 }
 
-void* internet_poll_thread(void* arg) {
+void* internet_poll_thread() {
     while (!stop_requested) {
         internet_up = (system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0);
         sleep(2);
@@ -440,9 +441,6 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_det
     SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    int bar_size = (int)(surface->h * 0.66);
-    int spacing = 10;
-    int total_width = surface->w + spacing + bar_size;
     int start_x = 10;
     int y_pos = 10;
 
@@ -487,7 +485,6 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     SDL_GetRendererOutputSize(renderer, &w, &h);
 
     int margin = w / 50;
-    int spacing = w / 50;
 
     char imported_text[64];
     snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");

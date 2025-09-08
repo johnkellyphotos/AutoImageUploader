@@ -265,7 +265,7 @@ void load_config()
     struct json_object *parsed_json = json_tokener_parse(data);
     free(data);
 
-    struct json_object *j_track_file, *j_ftp_url, *j_ftp_userpwd;
+    struct json_object *j_ftp_url, *j_ftp_userpwd;
 
     json_object_object_get_ex(parsed_json, "FTP_URL", &j_ftp_url);
     json_object_object_get_ex(parsed_json, "FTP_USERPWD", &j_ftp_userpwd);
