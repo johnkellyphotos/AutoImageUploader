@@ -25,23 +25,32 @@ GPContext *global_context = NULL;
 volatile int camera_initialized = 0;
 volatile int camera_busy_flag = 0;
 
-void list_files_recursive(const char *folder) {
-    _log("Entering folder: %s", folder);
+void list_files_recursive(const char *folder)
+{
+    _log("Recursively entering folder: %s", folder);
 
     CameraList *subfolders = NULL;
     gp_list_new(&subfolders);
+    
     int ret = gp_camera_folder_list_folders(global_camera, folder, subfolders, global_context);
-    if (ret >= GP_OK) {
+    if (ret >= GP_OK)
+    {
         int sub_count = gp_list_count(subfolders);
-        for (int i = 0; i < sub_count; i++) {
+        for (int i = 0; i < sub_count; i++)
+        {
             const char *sub = NULL;
             gp_list_get_name(subfolders, i, &sub);
-            if (sub) {
+            if (sub)
+            {
                 char path[1024];
                 if (strcmp(folder, "/") == 0)
+                {
                     snprintf(path, sizeof(path), "/%s", sub);
+                }
                 else
+                {
                     snprintf(path, sizeof(path), "%s/%s", folder, sub);
+                }
                 list_files_recursive(path);
             }
         }
@@ -51,28 +60,38 @@ void list_files_recursive(const char *folder) {
     CameraList *files = NULL;
     gp_list_new(&files);
     ret = gp_camera_folder_list_files(global_camera, folder, files, global_context);
-    if (ret >= GP_OK) {
+    if (ret >= GP_OK)
+    {
         int file_count = gp_list_count(files);
-        for (int j = 0; j < file_count; j++) {
+        for (int j = 0; j < file_count; j++)
+        {
             const char *filename = NULL;
             gp_list_get_name(files, j, &filename);
-            if (filename) {
+            if (filename)
+            {
                 _log("Downloading file %s/%s", folder, filename);
 
                 CameraFile *file = NULL;
                 gp_file_new(&file);
-                if (gp_camera_file_get(global_camera, folder, filename, GP_FILE_TYPE_NORMAL, file, global_context) >= GP_OK) {
+
+                if (gp_camera_file_get(global_camera, folder, filename, GP_FILE_TYPE_NORMAL, file, global_context) >= GP_OK)
+                {
                     char file_path[8192];
                     snprintf(file_path, sizeof(file_path), "%s/%s", LOCAL_DIR, filename);
 
                     struct stat st;
-                    if (stat(file_path, &st) == 0) {
+                    if (stat(file_path, &st) == 0)
+                    {
                         _log("Skipping existing file %s", file_path);
-                    } else {
+                    }
+                    else
+                    {
                         gp_file_save(file, file_path);
                         _log("Saved file to %s", file_path);
                     }
-                } else {
+                }
+                else
+                {
                     _log("Failed to download file %s/%s", folder, filename);
                 }
                 gp_file_free(file);
@@ -83,7 +102,8 @@ void list_files_recursive(const char *folder) {
 }
 
 
-void camera_init_global() {
+void camera_init_global()
+{
     if (camera_initialized)
     {
         _log("Camera already inited");
@@ -92,21 +112,26 @@ void camera_init_global() {
 
     _log("Attempting global init of camera.");
     global_context = gp_context_new();
-    if (!global_context) {
+    if (!global_context)
+    {
         camera_found = 0;
         _log("Failed to create gphoto2 context.");
         return;
     }
 
     const int MAX_RETRIES = 3;
-    for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        if (gp_camera_new(&global_camera) < GP_OK) {
+    for (int attempt = 0; attempt < MAX_RETRIES; attempt++)
+    {
+        if (gp_camera_new(&global_camera) < GP_OK)
+        {
             _log("Failed to create camera object (attempt %d)", attempt + 1);
             sleep(1);
             continue;
         }
+
         int ret = gp_camera_init(global_camera, global_context);
-        if (ret >= GP_OK) {
+        if (ret >= GP_OK)
+        {
             camera_initialized = 1;
             camera_found = 1;
             _log("Camera initialized.");
@@ -120,6 +145,7 @@ void camera_init_global() {
         {
             camera_found = 0;
         }
+
         _log("Camera init failed (ret=%d: %s), retrying...", ret, gp_result_as_string(ret));
         gp_camera_free(global_camera);
         global_camera = NULL;
@@ -131,27 +157,27 @@ void camera_init_global() {
     _log("Camera could not be initialized.");
 }
 
-void download_existing_files() {
+void download_existing_files()
+{
     pthread_mutex_lock(&camera_mutex);
 
-    if (!camera_initialized) {
-        _log("Camera not intialized in download_existing_files()... initializing...");
+    if (!camera_initialized)
+    {
         camera_init_global();
-        if (!camera_initialized) {
+        if (!camera_initialized)
+        {
             _log("Camera failed intialized in download_existing_files()... aborting...");
             pthread_mutex_unlock(&camera_mutex);
             return;
         }
     }
 
-    _log("Camera positive intialization in download_existing_files().");
-
     camera_busy_flag = 1;
-
     CameraList *folders = NULL;
     gp_list_new(&folders);
     int ret = gp_camera_folder_list_folders(global_camera, "/", folders, global_context);
-    if (ret < GP_OK) {
+    if (ret < GP_OK)
+    {
         _log("Failed to list folders: %d", ret);
         gp_list_free(folders);
         camera_busy_flag = 0;
@@ -364,7 +390,8 @@ int upload_file(const char *filepath, const char *filename)
     return success;
 }
 
-int check_camera_connected() {
+int check_camera_connected()
+{
     int found = 0;
 
     pthread_mutex_lock(&camera_mutex);
