@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = `sdl2-config --cflags`
-LDFLAGS = `sdl2-config --libs` -lSDL2_ttf -lpthread -lcurl -ljson-c
+LDFLAGS = `sdl2-config --libs` -lSDL2_ttf -lpthread -lcurl -ljson-c -lusb-1.0
 
 all: uploader_gui
 

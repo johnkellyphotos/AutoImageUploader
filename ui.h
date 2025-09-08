@@ -1,4 +1,5 @@
 #include <signal.h>
+#include <libusb-1.0/libusb.h>
 
 #define MAX_NETWORKS 32
 #define MAX_PASSWORD 128
@@ -37,7 +38,6 @@ typedef enum
 volatile sig_atomic_t stop_requested = 0;
 
 Screen current_screen = SCREEN_MAIN;
-
 
 void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) 
 {
@@ -226,9 +226,32 @@ int mouse_over_button(Button *btn, int mx, int my)
     return mx >= btn->x && mx <= btn->x + btn->w && my >= btn->y && my <= btn->y + btn->h;
 }
 
+void kill_camera_users() 
+{
+    libusb_context *ctx;
+    libusb_device **list;
+    ssize_t cnt;
+    libusb_init(&ctx);
+    cnt = libusb_get_device_list(ctx, &list);
+    for (ssize_t i = 0; i < cnt; i++) {
+        struct libusb_device_descriptor desc;
+        libusb_get_device_descriptor(list[i], &desc);
+        if (desc.idVendor == 0x04b0 && desc.idProduct == 0x043a) {
+            uint8_t bus = libusb_get_bus_number(list[i]);
+            uint8_t addr = libusb_get_device_address(list[i]);
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "fuser -k /dev/bus/usb/%03d/%03d", bus, addr);
+            system(cmd);
+        }
+    }
+    libusb_free_device_list(list, 1);
+    libusb_exit(ctx);
+}
+
 void handle_sigint(int sig)
 {
     stop_requested = 1;
+    kill_camera_users();
 }
 
 void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn)
@@ -369,6 +392,32 @@ int internet_connected()
     return system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0;
 }
 
+void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_detected)
+{
+    SDL_Color font_color = camera_detected 
+        ? (SDL_Color){55, 255, 55, 255} 
+        : (SDL_Color){255, 0, 0, 255};
+    const char *status_text = camera_detected ? "Camera detected" : "No camera detected";
+
+    int screen_width, screen_height;
+    SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
+
+    SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+
+    int bar_size = (int)(surface->h * 0.66);
+    int spacing = 10;
+    int total_width = surface->w + spacing + bar_size;
+    int start_x = 10;
+    int y_pos = 10;
+
+    SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
+    SDL_RenderCopy(renderer, texture, NULL, &dst);
+
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
 void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_strength)
 {
     SDL_Color font_color = internet_connected() 
@@ -410,7 +459,7 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     char uploaded_text[64];
     snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", image_status->uploaded, image_status->uploaded == 1 ? "" : "s");
 
-    int y_offset = 50;
+    int y_offset = 100;
     render_text(renderer, font, imported_text, margin, y_offset);
     y_offset += h / 30 + 5;
 

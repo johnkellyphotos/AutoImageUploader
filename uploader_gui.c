@@ -52,6 +52,8 @@ int main()
     ImageStatus image_status = {0, 0, 0};
     SDL_Event e;
 
+    int camera_detected = 0;
+
     signal(SIGINT, handle_sigint);
 
     load_config();
@@ -66,11 +68,16 @@ int main()
         {
             if (!camera_present()) 
             {
+                camera_detected = 0;
                 _log("No camera detected. Waiting 2s before retry.");
             }
             else
             {
+                camera_detected = 1;
                 download_existing_files();
+
+                image_status.imported = 1;
+                image_status.status = 1;
 
                 gphoto_pid = fork();
                 if (gphoto_pid == 0) 
@@ -155,8 +162,11 @@ int main()
                 snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
 
                 _log("Attempting to upload file: %s.", dir->d_name);
+                image_status.status = 2;
                 if (upload_file(path, dir->d_name))
                 {
+                    image_status.uploaded += 1;
+                    image_status.status = 0;
                     _log("Upload complete.");
                     mark_uploaded(dir->d_name);
                 }
@@ -222,6 +232,7 @@ int main()
         SDL_RenderClear(renderer);
 
         int strength = get_link_strength();
+        render_camera_status(renderer, font, camera_detected);
         render_connection_status(renderer, font, strength);
 
         switch (current_screen)
@@ -267,11 +278,6 @@ int main()
 
         SDL_RenderPresent(renderer);
         SDL_Delay(500); // app refresh rate, 500ms
-
-        // Example progression - remove after testing
-        image_status.imported += 1;
-        image_status.uploaded += (image_status.status == 2) ? 1 : 0;
-        image_status.status = (image_status.status + 1) % 3;
     }
 
     if (font)
