@@ -9,6 +9,8 @@ volatile int camera_found = 0;
 volatile int link_strength_value = 0;
 volatile int internet_up = 0;
 volatile int networks_ready = 0;
+volatile int select_network_index = 0;
+volatile int has_attempted_connection = 0;
 
 #include "log.h"
 #include "ui.h"
@@ -52,6 +54,9 @@ int main()
 
     Button back_button;
     setup_config_buttons(screen_width, screen_height, &back_button);
+
+    Button retry_button;
+    setup_retry_button(screen_width, screen_height, &retry_button);
 
     Button buttons[2];
     setup_buttons(screen_width, screen_height, buttons);
@@ -103,16 +108,22 @@ int main()
 
                 for (int i = 0; i < 2; i++)
                 {
-                    if (mx >= buttons[i].x && mx <= buttons[i].x + buttons[i].w &&
-                        my >= buttons[i].y && my <= buttons[i].y + buttons[i].h)
+                    if (button_is_pressed(buttons[i], mx, my))
                     {
-                        if (current_screen == SCREEN_MAIN)
+                        if (i == 0)
                         {
-                            current_screen = SCREEN_CONFIG;
+                            if (current_screen == SCREEN_MAIN)
+                            {
+                                current_screen = SCREEN_NETWORK_CONFIG;
+                            }
+                            else
+                            {
+                                current_screen = SCREEN_MAIN;
+                            }
                         }
                         else
                         {
-                            current_screen = SCREEN_MAIN;
+                            // config button not set up yet.
                         }
                     }
                 }
@@ -122,8 +133,7 @@ int main()
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
-        render_camera_status(renderer, font, camera_found);
-        render_connection_status(renderer, font, link_strength_value);
+        render_header(renderer, font);
 
         switch (current_screen)
         {
@@ -132,18 +142,20 @@ int main()
                 render_buttons(renderer, font, buttons, 2);
                 break;
 
-            case SCREEN_CONFIG:
+            case SCREEN_NETWORK_CONFIG:
                 
                 if (!networks_ready)
                 {
-                    render_text(renderer, font, "Loading networks...", 50, 50);
-
+                    // loading network list
+                    render_loading_network_text(renderer, font);
                     pthread_t scan_networks;
                     pthread_create(&scan_networks, NULL, scan_networks_thread, NULL);
                 }
-                else
+                else if (!select_network_index)
                 {
-                    select_network(renderer, font, networks, net_count);
+                    // needs to select a network
+                    select_network_index = render_select_network(renderer, font, networks, net_count, back_button, retry_button);
+                    printf("Selected network is %s", networks[select_network_index].ssid);
 
                     for (int i = 0; i < net_count; i++)
                     {
@@ -154,6 +166,25 @@ int main()
                         SDL_RenderCopy(renderer, t, NULL, &r);
                         SDL_FreeSurface(s);
                         SDL_DestroyTexture(t);
+                    }
+                }
+                else
+                {
+                    // network has been selected. Attempt to connect without password
+                    if (!has_attempted_connection && connect_to_network(networks[select_network_index].ssid, NULL) != 0)
+                    {
+                        has_attempted_connection = 1;
+                        
+                        render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
+                        
+                        if (strlen(networks[select_network_index].password) > 0)
+                        {
+                            connect_to_network(networks[select_network_index].ssid, networks[select_network_index].password);
+                        }
+                    }
+                    else
+                    {
+                        render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
                     }
                 }
 

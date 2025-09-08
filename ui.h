@@ -2,7 +2,7 @@
 #include <libusb-1.0/libusb.h>
 #include <unistd.h>
 
-#define MAX_NETWORKS 32
+#define MAX_NETWORKS 3
 #define MAX_PASSWORD 128
 #define MAX_CMD 512
 
@@ -12,6 +12,7 @@ int net_count = 0;
 typedef struct
 {
     char ssid[128];
+    char password[128];
 } WifiNetwork;
 
 WifiNetwork networks[MAX_NETWORKS];
@@ -32,12 +33,21 @@ typedef struct
 typedef enum
 { 
     SCREEN_MAIN, 
-    SCREEN_CONFIG 
+    SCREEN_NETWORK_CONFIG
 } Screen;
 
 volatile sig_atomic_t stop_requested = 0;
 
 Screen current_screen = SCREEN_MAIN;
+
+int number_dots_for_loading_screen = 1;
+int screen_refresh_count = 0;
+
+int button_is_pressed(Button button, int mx, int my)
+{
+    // checks if the click event occured inside the boundaries of the button. Does not know Z-index.
+    return mx >= button.x && mx <= button.x + button.w && my >= button.y && my <= button.y + button.h;
+}
 
 void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) 
 {
@@ -48,6 +58,27 @@ void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x
     SDL_RenderCopy(renderer, texture, NULL, &dst);
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
+}
+
+void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
+{
+    char dots[5] = {0};
+    for (int x = 0; x < number_dots_for_loading_screen && x < 4; x++)
+    {
+        dots[x] = '.';
+    }
+
+    if (screen_refresh_count++ > 30)
+    {
+        // roughly once per half second based on 60 refreshes / sec
+        number_dots_for_loading_screen = (number_dots_for_loading_screen >= 4) ? 1 : number_dots_for_loading_screen + 1;
+        screen_refresh_count = 0;
+    }
+
+    char loading_statement[64];
+    snprintf(loading_statement, sizeof(loading_statement), "Loading networks%s", dots);
+
+    render_text(renderer, font, loading_statement, 10, 50);
 }
 
 int list_networks(WifiNetwork networks[], int max)
@@ -66,9 +97,25 @@ int list_networks(WifiNetwork networks[], int max)
         line[strcspn(line, "\n")] = 0;
         if (strlen(line) > 0)
         {
-            strncpy(networks[count].ssid, line, sizeof(networks[count].ssid));
-            networks[count].ssid[sizeof(networks[count].ssid)-1] = 0;
-            count++;
+            int number_networks = count;
+
+            int add_to_network_list = 1;
+            for (int x=0; x<number_networks; x++)
+            {
+                if (strcmp(networks[x].ssid, line) == 0)
+                {
+                    // already in network list (avoid duplicates)
+                    add_to_network_list = 0;
+                    break;
+                }
+            }
+
+            if (add_to_network_list)
+            {
+                strncpy(networks[count].ssid, line, sizeof(networks[count].ssid));
+                networks[count].ssid[sizeof(networks[count].ssid)-1] = 0;
+                count++;
+            }
         }
     }
 
@@ -83,7 +130,55 @@ void* scan_networks_thread()
     return NULL;
 }
 
-int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[], int net_count)
+void clip_string(char *dest, const char *src, int n)
+{
+    int i;
+    for (i = 0; i < n && src[i]; i++)
+    {
+        dest[i] = src[i];
+    }
+    dest[i] = '\0';
+}
+
+int connect_to_network(const char *ssid, const char *password)
+{
+    char cmd[512];
+    if (password && strlen(password) > 0)
+    {
+        snprintf(cmd, sizeof(cmd), "nmcli device wifi connect '%s' password '%s'", ssid, password);
+    }
+    else
+    {
+        snprintf(cmd, sizeof(cmd), "nmcli device wifi connect '%s'", ssid);
+    }
+
+    int ret = system(cmd);
+    return WEXITSTATUS(ret);
+}
+
+void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn)
+{
+    SDL_Rect rect = {btn->x, btn->y, btn->w, btn->h};
+    SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
+    SDL_RenderFillRect(renderer, &rect);
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderDrawRect(renderer, &rect);
+
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *surface = TTF_RenderText_Solid(font, btn->label, white);
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+
+    int tx = btn->x + (btn->w - surface->w) / 2;
+    int ty = btn->y + (btn->h - surface->h) / 2;
+    SDL_Rect dst = {tx, ty, surface->w, surface->h};
+    SDL_RenderCopy(renderer, texture, NULL, &dst);
+
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
+int render_select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[], int net_count, Button back_button, Button retry_button)
 {
     int selected = -1;
     SDL_Event e;
@@ -94,17 +189,33 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 
     while (!stop_requested && selected == -1)
     {
-        SDL_Rect clear_area = {0, 40, screen_width, screen_height - 40};
+        SDL_Rect clear_area = {0, 40, screen_width, screen_height - 40 - 60};
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderFillRect(renderer, &clear_area);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-        int top_margin = 50, select_text_height = 30;
-
+        int top_margin = 30, left_margin = 20, select_text_height = 30;
         SDL_Color white = {255, 255, 255, 255};
+
+        if (net_count < 1)
+        {
+            SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", white);
+            SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
+            SDL_Rect title_rect = {left_margin, top_margin + 20, title_surf->w, title_surf->h};
+            SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
+            SDL_FreeSurface(title_surf);
+            SDL_DestroyTexture(title_tex);
+
+            // add back and retry button
+            render_button(renderer, font, &back_button);
+            render_button(renderer, font, &retry_button);
+
+            return -1;
+        }
+
         SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
         SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-        SDL_Rect title_rect = {select_text_height, top_margin, title_surf->w, title_surf->h};
+        SDL_Rect title_rect = {left_margin, top_margin, title_surf->w, title_surf->h};
         SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
         SDL_FreeSurface(title_surf);
         SDL_DestroyTexture(title_tex);
@@ -114,7 +225,7 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 
         for (int i = 0; i < net_count; i++)
         {
-            SDL_Rect r = {50, top_margin + select_text_height + i * 40, 220, 30};
+            SDL_Rect r = {left_margin, top_margin + select_text_height + i * 40, 320, 30};
             net_rects[i] = r;
 
             SDL_Color bg = {40, 40, 40, 255};
@@ -129,13 +240,19 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
             SDL_RenderDrawRect(renderer, &r);
 
-            SDL_Surface *s = TTF_RenderText_Solid(font, networks[i].ssid, (SDL_Color){255,255,255,255});
+            char network_name[32];
+            clip_string(network_name, networks[i].ssid, 32);
+            
+            SDL_Surface *s = TTF_RenderText_Solid(font, network_name, (SDL_Color){255,255,255,255});
             SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
             SDL_Rect dst = {r.x + 10, r.y + (r.h - s->h)/2, s->w, s->h};
             SDL_RenderCopy(renderer, t, NULL, &dst);
             SDL_FreeSurface(s);
             SDL_DestroyTexture(t);
         }
+
+        // add back and retry button
+        render_button(renderer, font, &back_button);
 
         SDL_RenderPresent(renderer);
 
@@ -148,7 +265,15 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 
             if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
             {
+
                 int mx = e.button.x, my = e.button.y;
+
+                if (button_is_pressed(back_button, mx, my))
+                {
+                    current_screen = SCREEN_MAIN;
+                    return -1;
+                }
+
                 for (int i = 0; i < net_count; i++)
                 {
                     if (mx >= net_rects[i].x && mx <= net_rects[i].x + net_rects[i].w &&
@@ -161,7 +286,7 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
             }
         }
 
-        SDL_Delay(16);
+        SDL_Delay(16); // just under 60 frames per second
     }
 
     return selected;
@@ -220,13 +345,6 @@ void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, ch
     SDL_StopTextInput();
 }
 
-void connect_to_network(const char *ssid, const char *password)
-{
-    char cmd[MAX_CMD];
-    snprintf(cmd, sizeof(cmd), "nmcli device wifi connect '%s' password '%s' &", ssid, password);
-    system(cmd);
-}
-
 int mouse_over_button(Button *btn, int mx, int my)
 {
     return mx >= btn->x && mx <= btn->x + btn->w && my >= btn->y && my <= btn->y + btn->h;
@@ -265,28 +383,6 @@ void handle_sigint(int sig)
     kill_camera_users();
 }
 
-void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn)
-{
-    SDL_Rect rect = {btn->x, btn->y, btn->w, btn->h};
-    SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
-    SDL_RenderFillRect(renderer, &rect);
-
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawRect(renderer, &rect);
-
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *surface = TTF_RenderText_Solid(font, btn->label, white);
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-
-    int tx = btn->x + (btn->w - surface->w) / 2;
-    int ty = btn->y + (btn->h - surface->h) / 2;
-    SDL_Rect dst = {tx, ty, surface->w, surface->h};
-    SDL_RenderCopy(renderer, texture, NULL, &dst);
-
-    SDL_FreeSurface(surface);
-    SDL_DestroyTexture(texture);
-}
-
 void setup_config_buttons(int screen_w, int screen_h, Button *back_button)
 {
     int margin = screen_w / 50;
@@ -308,6 +404,21 @@ void render_buttons(SDL_Renderer *renderer, TTF_Font *font, Button buttons[], in
     {
         render_button(renderer, font, &buttons[i]);
     }
+}
+
+void setup_retry_button(int screen_w, int screen_h, Button *retry_button)
+{
+    int margin = screen_w / 50;
+    int spacing = screen_w / 50;
+    int btn_w = (screen_w - margin*2 - spacing) / 2;
+    int btn_h = screen_h / 5;
+    int y = screen_h - btn_h - margin;
+
+    retry_button->x = margin + btn_w + spacing;
+    retry_button->y = y;
+    retry_button->w = btn_w;
+    retry_button->h = btn_h;
+    retry_button->label = "Retry";
 }
 
 void setup_buttons(int screen_w, int screen_h, Button buttons[])
@@ -397,7 +508,7 @@ int get_link_strength()
 
     return strength;
 }
-    
+
 void* link_poll_thread()
 {
     while (!stop_requested)
@@ -418,10 +529,10 @@ void* internet_poll_thread()
     return NULL;
 }
 
-void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_detected)
+void render_camera_status(SDL_Renderer *renderer, TTF_Font *font)
 {
     SDL_Color font_color;
-    switch (camera_detected)
+    switch (camera_found)
     {
         case -1:
             font_color = (SDL_Color){255, 255, 0, 255};
@@ -435,7 +546,7 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_det
     }
 
     const char *status_text;
-    switch (camera_detected)
+    switch (camera_found)
     {
         case -1:
             status_text = "Camera detected - no communication";
@@ -464,7 +575,7 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_det
     SDL_DestroyTexture(texture);
 }
 
-void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_strength)
+void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
 {
     SDL_Color font_color = internet_up
         ? (SDL_Color){55, 255, 55, 255} 
@@ -486,7 +597,7 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_s
     SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
 
-    render_signal_indicator(renderer, start_x + surface->w + spacing, y_pos + (surface->h - bar_size) / 2, bar_size, bar_size, link_strength);
+    render_signal_indicator(renderer, start_x + surface->w + spacing, y_pos + (surface->h - bar_size) / 2, bar_size, bar_size, link_strength_value);
 
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
@@ -497,7 +608,7 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     int w, h;
     SDL_GetRendererOutputSize(renderer, &w, &h);
 
-    int margin = w / 50;
+    int margin = 20;
 
     char imported_text[64];
     snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");
@@ -529,4 +640,58 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     }
 
     render_text(renderer, font, status_str, margin, y_offset);
+}
+
+void render_header(SDL_Renderer *renderer, TTF_Font *font)
+{
+    render_camera_status(renderer, font); 
+    render_connection_status(renderer, font);   
+}
+
+int render_password_prompt(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
+{
+    SDL_StartTextInput();
+    int done = 0;
+    SDL_Event e;
+    password[0] = 0;
+
+    while (!done && !stop_requested)
+    {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+
+        char prompt[256];
+        snprintf(prompt, sizeof(prompt), "Enter password for %s:", ssid);
+        render_text(renderer, font, prompt, 50, 50);
+
+        char masked[MAX_PASSWORD];
+        int len = strlen(password);
+        if (len > 0) memset(masked, '*', len);
+        masked[len] = 0;
+        render_text(renderer, font, masked, 50, 100);
+
+        SDL_RenderPresent(renderer);
+
+        while (SDL_PollEvent(&e))
+        {
+            if (e.type == SDL_QUIT) stop_requested = 1;
+
+            if (e.type == SDL_TEXTINPUT)
+                strncat(password, e.text.text, max_len - strlen(password) - 1);
+
+            if (e.type == SDL_KEYDOWN)
+            {
+                if (e.key.keysym.sym == SDLK_RETURN) done = 1;
+                if (e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    int l = strlen(password);
+                    if (l > 0) password[l-1] = 0;
+                }
+            }
+        }
+        SDL_Delay(16);
+    }
+
+    SDL_StopTextInput();
+    return done;
 }
