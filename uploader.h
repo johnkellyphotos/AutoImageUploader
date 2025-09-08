@@ -8,11 +8,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <spawn.h>
 
 const char *LOCAL_DIR;
 const char *TRACK_FILE = ".track.txt";
 const char *FTP_URL;
 const char *FTP_USERPWD;
+
+extern char **environ;
 
 pthread_mutex_t track_file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -300,89 +303,123 @@ void download_existing_files()
     pclose(fp);
 }
 
-int camera_present() 
-{
-    FILE *fp = popen("gphoto2 --auto-detect", "r");
-    if (!fp) return 0;
-
-    char line[512];
-    int found = 0;
-    char camera_name[256] = {0};
-
-    // skip header lines
-    fgets(line, sizeof(line), fp);
-    fgets(line, sizeof(line), fp);
-
-    while (fgets(line, sizeof(line), fp)) {
-        if (strstr(line, "usb") || strstr(line, "ptp")) {
-            found = 1;
-
-            char *last_space = strrchr(line, '\t');
-            if (!last_space) last_space = strrchr(line, ' ');
-            if (last_space) *last_space = 0;
-
-            strncpy(camera_name, line, sizeof(camera_name) - 1);
-            _log("Detected camera: %s", camera_name);
-            break;
+void *camera_poll_thread(void *arg) {
+    while (1) {
+        FILE *fp = popen("gphoto2 --auto-detect", "r");
+        if (!fp) {
+            camera_found = 0;
+            sleep(1);
+            continue;
         }
-    }
 
-    pclose(fp);
-    return found;
+        char line[512];
+        int found = 0;
+
+        fgets(line, sizeof(line), fp);
+        fgets(line, sizeof(line), fp);
+
+        while (fgets(line, sizeof(line), fp)) {
+            if (strstr(line, "usb") || strstr(line, "ptp")) {
+                found = 1;
+                break;
+            }
+        }
+
+        pclose(fp);
+        camera_found = found;
+        sleep(1);  // poll interval
+    }
+    return NULL;
 }
+
+#include <spawn.h>
+extern char **environ;
 
 void *import_upload_worker(void *arg) 
 {
-    static pid_t gphoto_pid = -1;
     ImageStatus *image_status = (ImageStatus *)arg;
+
+    _log("Starting upload worker.");
 
     while (!stop_requested)
     {
         image_status->imported = count_imported_images();
         image_status->uploaded = count_uploaded_images();
 
-        // Camera download handling
-        if (camera_present())
-        {
-            if (gphoto_pid <= 0)
-            {
-                download_existing_files();
-                image_status->status = 1;
+        static time_t last_camera_check = 0;
+        time_t now = time(NULL);
 
-                gphoto_pid = fork();
-                if (gphoto_pid == 0) 
+        if (now - last_camera_check >= 2)
+        {
+            last_camera_check = now;
+
+            if (camera_found && image_status->status != 1)
+            {
+                _log("Starting camera download process.");
+
+                pid_t pid;
+                char *argv[] = {
+                    "gphoto2",
+                    "--wait-event-and-download",
+                    "--skip-existing",
+                    "--folder", "/",
+                    "--filename", "/tmp/gphoto_%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg",
+                    NULL
+                };
+
+                int ret = posix_spawn(&pid, "/usr/bin/gphoto2", NULL, NULL, argv, environ);
+                if (ret == 0)
                 {
-                    char filename[1100];
-                    snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
-                    execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL);
-                    _exit(1);
+                    image_status->status = 1; // importing
+                }
+                else
+                {
+                    _log("posix_spawn failed: %d", ret);
                 }
             }
         }
 
-        int status;
-        pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
-        if (ret > 0 || ret == -1) gphoto_pid = -1;
+        // Non-blocking wait for child
+        if (image_status->status == 1)
+        {
+            int status;
+            pid_t r = waitpid(-1, &status, WNOHANG);
+            if (r > 0)
+            {
+                image_status->status = 0; // waiting
+            }
+        }
 
-        // Upload loop runs regardless of camera
+        // Upload images
         DIR *d = opendir(LOCAL_DIR);
         if (d) 
         {
             struct dirent *dir;
             while ((dir = readdir(d)) != NULL) 
             {
-                if (dir->d_type != DT_REG) continue;
+                if (dir->d_type != DT_REG)
+                {
+                    continue;
+                }
+
                 const char *ext = strrchr(dir->d_name, '.');
-                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg"))) continue;
-                if (is_uploaded(dir->d_name)) continue;
+
+                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg")))
+                {
+                    continue;
+                }
+                if (is_uploaded(dir->d_name))
+                {
+                    continue;
+                }
 
                 char path[1024];
                 snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
-                image_status->status = 2;
+                image_status->status = 2; // uploading
                 if (upload_file(path, dir->d_name)) 
                 {
-                    image_status->status = 0;
                     mark_uploaded(dir->d_name);
+                    image_status->status = 0;
                 }
             }
             closedir(d);

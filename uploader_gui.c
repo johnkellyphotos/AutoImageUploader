@@ -5,6 +5,10 @@
 #include <string.h>
 #include <pthread.h>
 
+volatile int camera_found = 0;
+volatile int link_strength_value = 0;
+volatile int internet_up = 0;
+
 #include "ui.h"
 #include "uploader.h"
 
@@ -25,8 +29,21 @@ int main()
         return 1;
     }
 
-    SDL_Window *window = SDL_CreateWindow("Uploader GUI", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 320, 480, SDL_WINDOW_FULLSCREEN_DESKTOP);
-    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    int full_screen_enabled = 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    
+    if (full_screen_enabled)
+    {
+        window = SDL_CreateWindow("Tritium Uploader", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 480, 320, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    }
+    else
+    {
+        window = SDL_CreateWindow("Tritium Uploader", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 480, 320, 0);
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
 
     int screen_width, screen_height;
     SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
@@ -58,24 +75,43 @@ int main()
     pthread_t worker;
     pthread_create(&worker, NULL, import_upload_worker, &image_status);
 
+    pthread_t cam_thread;
+    pthread_create(&cam_thread, NULL, camera_poll_thread, NULL);
+
+    pthread_t link_strength;
+    pthread_create(&link_strength, NULL, link_poll_thread, NULL);
+
+    pthread_t internet_is_up;
+    pthread_create(&internet_is_up, NULL, internet_poll_thread, NULL);
+
+    SDL_Event e;
+
     while (!stop_requested) 
     {
+        while (SDL_PollEvent(&e)) 
+        {
+            // prevent killing unresponsive window if not interacted with
+            if (e.type == SDL_QUIT)
+            {
+                stop_requested = 1;
+            }
+        }
+
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
-        render_camera_status(renderer, font, camera_present());
-        render_connection_status(renderer, font, get_link_strength());
+        render_camera_status(renderer, font, camera_found);
+        render_connection_status(renderer, font, link_strength_value);
 
         switch (current_screen)
         {
             case SCREEN_MAIN:
                 render_status_box(renderer, font, &image_status);
                 render_buttons(renderer, font, buttons, 2);
-            break;
+                break;
 
             case SCREEN_CONFIG:
-                render_button(renderer, font, &back_button);
-
+                
                 if (!networks_ready)
                 {
                     render_text(renderer, font, "Loading networks...", 50, 50);
@@ -104,14 +140,17 @@ int main()
                 }
 
                 render_button(renderer, font, &back_button);
-            break;
+                break;
         }
 
         SDL_RenderPresent(renderer);
-        SDL_Delay(500);
+        SDL_Delay(16);
     }
 
-    if (font) TTF_CloseFont(font);
+    if (font)
+    {
+        TTF_CloseFont(font);
+    }
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     TTF_Quit();

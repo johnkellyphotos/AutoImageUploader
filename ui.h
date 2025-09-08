@@ -1,5 +1,6 @@
 #include <signal.h>
 #include <libusb-1.0/libusb.h>
+#include <unistd.h>
 
 #define MAX_NETWORKS 32
 #define MAX_PASSWORD 128
@@ -349,9 +350,9 @@ void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_hei
         SDL_RenderFillRect(renderer, &fg);
     }
 }
-    
+
 int get_link_strength()
-    {
+{
     FILE *f = fopen("/proc/net/wireless", "r");
     if (!f)
     {
@@ -386,10 +387,21 @@ int get_link_strength()
 
     return strength;
 }
+    
+void* link_poll_thread(void* arg) {
+    while (!stop_requested) {
+        link_strength_value = get_link_strength();
+        usleep(1000000);
+    }
+    return NULL;
+}
 
-int internet_connected()
-{
-    return system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0;
+void* internet_poll_thread(void* arg) {
+    while (!stop_requested) {
+        internet_up = (system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0);
+        sleep(2);
+    }
+    return NULL;
 }
 
 void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_detected)
@@ -420,10 +432,10 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font, int camera_det
 
 void render_connection_status(SDL_Renderer *renderer, TTF_Font *font, int link_strength)
 {
-    SDL_Color font_color = internet_connected() 
+    SDL_Color font_color = internet_up
         ? (SDL_Color){55, 255, 55, 255} 
         : (SDL_Color){255, 0, 0, 255};
-    const char *status_text = internet_connected() ? "Internet connected" : "No internet";
+    const char *status_text = internet_up ? "Internet connected" : "No internet";
 
     int screen_width, screen_height;
     SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
