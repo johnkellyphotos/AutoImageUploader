@@ -263,3 +263,62 @@ int camera_present()
     pclose(fp);
     return found;
 }
+
+void *import_upload_worker(void *arg) 
+{
+    static pid_t gphoto_pid = -1;
+    ImageStatus *image_status = (ImageStatus *)arg;
+
+    if (gphoto_pid <= 0) 
+    {
+        if (!camera_present()) 
+        {
+            image_status->status = 0;
+        } 
+        else 
+        {
+            download_existing_files();
+            image_status->imported = 1;
+            image_status->status = 1;
+
+            gphoto_pid = fork();
+            if (gphoto_pid == 0) 
+            {
+                char filename[1100];
+                snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
+                execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL);
+                _exit(1);
+            }
+        }
+    }
+
+    int status;
+    pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
+    if (ret > 0 || ret == -1) gphoto_pid = -1;
+
+    DIR *d = opendir(LOCAL_DIR);
+    if (d) 
+    {
+        struct dirent *dir;
+        while ((dir = readdir(d)) != NULL) 
+        {
+            if (dir->d_type != DT_REG) continue;
+            const char *ext = strrchr(dir->d_name, '.');
+            if (!ext || (strcmp(ext, ".jpg") && strcmp(ext, ".JPG"))) continue;
+            if (is_uploaded(dir->d_name)) continue;
+
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
+            image_status->status = 2;
+            if (upload_file(path, dir->d_name)) 
+            {
+                image_status->uploaded += 1;
+                image_status->status = 0;
+                mark_uploaded(dir->d_name);
+            }
+        }
+        closedir(d);
+    }
+
+    return NULL;
+}

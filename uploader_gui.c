@@ -34,7 +34,7 @@ int main()
     Button back_button;
     setup_config_buttons(screen_width, screen_height, &back_button);
 
-    Button buttons[2]; // main screen buttons
+    Button buttons[2];
     setup_buttons(screen_width, screen_height, buttons, 2);
 
     int font_size = screen_height / 20;
@@ -50,190 +50,22 @@ int main()
     }
 
     ImageStatus image_status = {0, 0, 0};
-    SDL_Event e;
-
-    int camera_detected = 0;
-
     signal(SIGINT, handle_sigint);
-
     load_config();
-
-    pid_t gphoto_pid = -1; // process ID for gphoto2
 
     _log("Initialization complete.");
 
     while (!stop_requested) 
     {
-        if (gphoto_pid <= 0) 
-        {
-            if (!camera_present()) 
-            {
-                camera_detected = 0;
-                _log("No camera detected. Waiting 2s before retry.");
-            }
-            else
-            {
-                camera_detected = 1;
-                download_existing_files();
+        pthread_t worker;
+        pthread_create(&worker, NULL, import_upload_worker, &image_status);
+        pthread_detach(worker);
 
-                image_status.imported = 1;
-                image_status.status = 1;
-
-                gphoto_pid = fork();
-                if (gphoto_pid == 0) 
-                {
-                    char filename[1100];
-                    snprintf(filename, sizeof(filename), "%s/%%f_%%Y%%m%%d-%%H%%M%%S_%%C.jpg", LOCAL_DIR);
-
-                    _log("Saving file from camera to to %s.", filename);
-                    execlp("gphoto2", "gphoto2", "--wait-event-and-download", "--skip-existing", "--folder", "/", "--filename", filename, NULL); // starts child process to download image
-
-                    _log("Failed to save file from camera to to %s.", filename);
-                    _exit(1);
-                }
-                else if (gphoto_pid < 0) 
-                {
-                    _log("Failed to fork process. continuing after 2 second wait...");
-                    perror("fork failed for wait-event-and-download");
-                    continue;
-                }
-            }
-        }
-
-        int status;
-        pid_t ret = waitpid(gphoto_pid, &status, WNOHANG);
-        if (ret == -1) {
-            perror("waitpid failed");
-            gphoto_pid = -1;
-        }
-        else if (ret > 0) 
-        {
-            if (WIFEXITED(status)) 
-            {
-                int code = WEXITSTATUS(status);
-                if (code == 0) 
-                {
-                    _log("Task completed and exited cleanly (process done).");
-                }
-                 else if (code == 1) 
-                 {
-                    _log("Task completed (likely no more events / camera removed).");
-                }
-                else
-                {
-                    _log("gphoto2 exited with error code %d (likely camera disconnect).", code);
-                }
-            } 
-            else if (WIFSIGNALED(status)) 
-            {
-                int sig = WTERMSIG(status);
-                _log("gphoto2 terminated by signal %d (likely camera disconnect).", sig);
-            }
-
-            gphoto_pid = -1;
-        }
-
-        DIR *d = opendir(LOCAL_DIR);
-        if (d) 
-        {
-            struct dirent *dir;
-            while ((dir = readdir(d)) != NULL) 
-            {
-                if (dir->d_type != DT_REG)
-                {
-                    continue;
-                }
-
-                const char *ext = strrchr(dir->d_name, '.');
-                
-                if (!ext || (strcmp(ext, ".jpg") != 0 && strcmp(ext, ".JPG") != 0))
-                {
-                    _log("Skipping upload of non JPEG image: %s because it is extension type: %s.", dir->d_name, ext ? ext : "(none)");
-                    continue;
-                }
-
-                if (is_uploaded(dir->d_name))
-                {
-                    _log("Skipping upload of %s because it marked as uploaded in track file.", dir->d_name);
-                    continue;
-                }
-
-                char path[1024];
-                snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
-
-                _log("Attempting to upload file: %s.", dir->d_name);
-                image_status.status = 2;
-                if (upload_file(path, dir->d_name))
-                {
-                    image_status.uploaded += 1;
-                    image_status.status = 0;
-                    _log("Upload complete.");
-                    mark_uploaded(dir->d_name);
-                }
-                else
-                {
-                    _log("Upload failed for file: %s.", dir->d_name);
-                }
-            }
-
-            closedir(d);
-        }
-        else
-        {
-            _log("Failed to open directory %s.", LOCAL_DIR);
-        }
-
-        SDL_Event e;
-        while (SDL_PollEvent(&e))
-        {
-            if (e.type == SDL_QUIT)
-            {
-                stop_requested = 1;
-            }
-
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
-            {
-                int mx = e.button.x, my = e.button.y;
-
-                switch (current_screen)
-                {
-                    case SCREEN_MAIN:
-                        if (mouse_over_button(&buttons[0], mx, my))
-                        {
-                            networks_ready = 0;
-                            pthread_t thread;
-                            pthread_create(&thread, NULL, scan_networks_thread, NULL);
-                            current_screen = SCREEN_CONFIG;
-                        }
-                    break;
-
-                    case SCREEN_CONFIG:
-                        if (mouse_over_button(&back_button, mx, my))
-                        {
-                            current_screen = SCREEN_MAIN;
-                        }
-                        else
-                        {
-                            for (int i = 0; i < net_count; i++)
-                            {
-                                SDL_Rect r = {50, 50 + i * 30, 200, 25};
-                                if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h)
-                                {
-                                    selected_network = i;
-                                }
-                            }
-                        }
-                    break;
-                }
-            }
-        }
-        
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
-        int strength = get_link_strength();
-        render_camera_status(renderer, font, camera_detected);
-        render_connection_status(renderer, font, strength);
+        render_camera_status(renderer, font, camera_present());
+        render_connection_status(renderer, font, get_link_strength());
 
         switch (current_screen)
         {
@@ -277,13 +109,10 @@ int main()
         }
 
         SDL_RenderPresent(renderer);
-        SDL_Delay(500); // app refresh rate, 500ms
+        SDL_Delay(500);
     }
 
-    if (font)
-    {
-        TTF_CloseFont(font);
-    }
+    if (font) TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     TTF_Quit();
