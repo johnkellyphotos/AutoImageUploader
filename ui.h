@@ -234,10 +234,13 @@ void kill_camera_users()
     ssize_t cnt;
     libusb_init(&ctx);
     cnt = libusb_get_device_list(ctx, &list);
-    for (ssize_t i = 0; i < cnt; i++) {
+
+    for (ssize_t i = 0; i < cnt; i++)
+    {
         struct libusb_device_descriptor desc;
         libusb_get_device_descriptor(list[i], &desc);
-        if (desc.idVendor == 0x04b0 && desc.idProduct == 0x043a) {
+        if (desc.idVendor == 0x04b0 && desc.idProduct == 0x043a)
+        {
             uint8_t bus = libusb_get_bus_number(list[i]);
             uint8_t addr = libusb_get_device_address(list[i]);
             char cmd[256];
@@ -245,6 +248,7 @@ void kill_camera_users()
             system(cmd);
         }
     }
+
     libusb_free_device_list(list, 1);
     libusb_exit(ctx);
 }
@@ -389,16 +393,20 @@ int get_link_strength()
     return strength;
 }
     
-void* link_poll_thread() {
-    while (!stop_requested) {
+void* link_poll_thread()
+{
+    while (!stop_requested)
+    {
         link_strength_value = get_link_strength();
         usleep(1000000);
     }
     return NULL;
 }
 
-void* internet_poll_thread() {
-    while (!stop_requested) {
+void* internet_poll_thread()
+{
+    while (!stop_requested)
+    {
         internet_up = (system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0);
         sleep(2);
     }
