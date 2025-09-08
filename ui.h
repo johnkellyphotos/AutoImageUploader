@@ -6,7 +6,6 @@
 #define MAX_PASSWORD 128
 #define MAX_CMD 512
 
-volatile int networks_ready = 0;
 int selected_network = -1;
 int net_count = 0;
 
@@ -90,16 +89,22 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
     SDL_Event e;
     SDL_Rect net_rects[MAX_NETWORKS];
 
+    int screen_width, screen_height;
+    SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
+
     while (!stop_requested && selected == -1)
     {
+        SDL_Rect clear_area = {0, 40, screen_width, screen_height - 40};
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
+        SDL_RenderFillRect(renderer, &clear_area);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+        int top_margin = 50, select_text_height = 30;
 
         SDL_Color white = {255, 255, 255, 255};
         SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
         SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-        SDL_Rect title_rect = {50, 10, title_surf->w, title_surf->h};
+        SDL_Rect title_rect = {select_text_height, top_margin, title_surf->w, title_surf->h};
         SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
         SDL_FreeSurface(title_surf);
         SDL_DestroyTexture(title_tex);
@@ -109,7 +114,7 @@ int select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[
 
         for (int i = 0; i < net_count; i++)
         {
-            SDL_Rect r = {50, 50 + i * 40, 220, 30};
+            SDL_Rect r = {50, top_margin + select_text_height + i * 40, 220, 30};
             net_rects[i] = r;
 
             SDL_Color bg = {40, 40, 40, 255};

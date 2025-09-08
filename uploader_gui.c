@@ -8,6 +8,7 @@
 volatile int camera_found = 0;
 volatile int link_strength_value = 0;
 volatile int internet_up = 0;
+volatile int networks_ready = 0;
 
 #include "log.h"
 #include "ui.h"
@@ -136,9 +137,14 @@ int main()
                 if (!networks_ready)
                 {
                     render_text(renderer, font, "Loading networks...", 50, 50);
+
+                    pthread_t scan_networks;
+                    pthread_create(&scan_networks, NULL, scan_networks_thread, NULL);
                 }
                 else
                 {
+                    select_network(renderer, font, networks, net_count);
+
                     for (int i = 0; i < net_count; i++)
                     {
                         SDL_Color color = {255, 255, 255, 255};
