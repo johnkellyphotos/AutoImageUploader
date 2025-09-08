@@ -17,8 +17,6 @@ const char *TRACK_FILE = ".track.txt";
 const char *FTP_URL;
 const char *FTP_USERPWD;
 
-extern char **environ;
-
 pthread_mutex_t track_file_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t camera_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -26,7 +24,6 @@ Camera *global_camera = NULL;
 GPContext *global_context = NULL;
 volatile int camera_initialized = 0;
 volatile int camera_busy_flag = 0;
-
 
 void list_files_recursive(const char *folder) {
     _log("Entering folder: %s", folder);
