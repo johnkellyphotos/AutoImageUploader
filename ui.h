@@ -21,7 +21,7 @@ typedef struct
 {
     int imported;
     int uploaded;
-    int status; // 0 = waiting, 1 = importing, 2 = uploading
+    int status; // 0 = waiting, 1 = importing, 2 = uploading, 3 = No internet, import only
 } ImageStatus;
 
 typedef struct
@@ -478,8 +478,22 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     render_text(renderer, font, uploaded_text, margin, y_offset);
     y_offset += h / 30 + 10;
 
-    const char *status_str = (image_status->status == 0) ? "Waiting for images" :
-                             (image_status->status == 1) ? "Importing images" : "Uploading images";
+    const char *status_str;
+    switch (image_status->status)
+    {
+        case 0:
+            status_str = "Waiting for images";
+            break;
+        case 1:
+            status_str = "Importing images";
+            break;
+        case 2:
+            status_str = "Uploading images";
+            break;
+        case 3:
+            status_str = "Importing images only - no internet";
+            break;
+    }
 
     render_text(renderer, font, status_str, margin, y_offset);
 }

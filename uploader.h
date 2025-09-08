@@ -370,7 +370,7 @@ void *import_upload_worker(void *arg)
                 int ret = posix_spawn(&pid, "/usr/bin/gphoto2", NULL, NULL, argv, environ);
                 if (ret == 0)
                 {
-                    image_status->status = 1; // importing
+                    image_status->status = internet_up ? 1 : 3; // importing w/ or w/o internet
                 }
                 else
                 {
@@ -392,7 +392,7 @@ void *import_upload_worker(void *arg)
 
         // Upload images
         DIR *d = opendir(LOCAL_DIR);
-        if (d) 
+        if (internet_up && d) 
         {
             struct dirent *dir;
             while ((dir = readdir(d)) != NULL) 
@@ -423,6 +423,10 @@ void *import_upload_worker(void *arg)
                 }
             }
             closedir(d);
+        }
+        else if (!internet_up && camera_found)
+        {
+            image_status->status = 3;
         }
 
         usleep(100000);
