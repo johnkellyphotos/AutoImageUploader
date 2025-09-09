@@ -81,13 +81,19 @@ void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
     render_text(renderer, font, loading_statement, 10, 50);
 }
 
-int list_networks(WifiNetwork networks[], int max)
+int list_networks(int max)
 {
+    // reset array to empty
+    memset(networks, 0, sizeof(networks));
+
     FILE *fp = popen("nmcli -t -f SSID dev wifi", "r");
     if (!fp)
     {
+        _log("Can not open file tto read Wifi status.");
         return 0;
     }
+
+    _log("Attempting to read Wifi information...");
 
     int count = 0;
     char line[256];
@@ -112,9 +118,14 @@ int list_networks(WifiNetwork networks[], int max)
 
             if (add_to_network_list)
             {
+                _log("Adding network %s to network list.", line);
                 strncpy(networks[count].ssid, line, sizeof(networks[count].ssid));
                 networks[count].ssid[sizeof(networks[count].ssid)-1] = 0;
                 count++;
+            }
+            else
+            {
+                _log("Declining to add network %s to network list because it is a duplicate.", line);
             }
         }
     }
@@ -125,7 +136,7 @@ int list_networks(WifiNetwork networks[], int max)
 
 void* scan_networks_thread()
 {
-    net_count = list_networks(networks, MAX_NETWORKS);
+    net_count = list_networks(MAX_NETWORKS);
     networks_ready = 1;
     return NULL;
 }
@@ -271,6 +282,10 @@ int render_select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork ne
                 if (button_is_pressed(back_button, mx, my))
                 {
                     current_screen = SCREEN_MAIN;
+                    has_attempted_connection = 0;
+                    select_network_index = -1;
+                    networks_ready = 0;
+                    ready_for_password = 0;
                     return -1;
                 }
 

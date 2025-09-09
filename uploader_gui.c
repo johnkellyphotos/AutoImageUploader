@@ -9,8 +9,9 @@ volatile int camera_found = 0;
 volatile int link_strength_value = 0;
 volatile int internet_up = 0;
 volatile int networks_ready = 0;
-volatile int select_network_index = 0;
+volatile int select_network_index = -1;
 volatile int has_attempted_connection = 0;
+volatile int ready_for_password = 0;
 
 #include "log.h"
 #include "ui.h"
@@ -33,7 +34,7 @@ int main()
         return 1;
     }
 
-    int full_screen_enabled = 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+    int full_screen_enabled = 1 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
 
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -143,56 +144,59 @@ int main()
                 break;
 
             case SCREEN_NETWORK_CONFIG:
-                
-                if (!networks_ready)
-                {
-                    // loading network list
-                    render_loading_network_text(renderer, font);
-                    pthread_t scan_networks;
-                    pthread_create(&scan_networks, NULL, scan_networks_thread, NULL);
-                }
-                else if (!select_network_index)
-                {
-                    // needs to select a network
-                    select_network_index = render_select_network(renderer, font, networks, net_count, back_button, retry_button);
-                    printf("Selected network is %s", networks[select_network_index].ssid);
 
-                    for (int i = 0; i < net_count; i++)
-                    {
-                        SDL_Color color = {255, 255, 255, 255};
-                        SDL_Surface *s = TTF_RenderText_Solid(font, networks[i].ssid, color);
-                        SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
-                        SDL_Rect r = {50, 50 + i * 30, s->w, s->h};
-                        SDL_RenderCopy(renderer, t, NULL, &r);
-                        SDL_FreeSurface(s);
-                        SDL_DestroyTexture(t);
-                    }
-                }
-                else
+                if (!ready_for_password)
                 {
-                    // network has been selected. Attempt to connect without password
-                    if (!has_attempted_connection && connect_to_network(networks[select_network_index].ssid, NULL) != 0)
+                    if (!networks_ready)
                     {
-                        has_attempted_connection = 1;
-                        
-                        render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
-                        
-                        if (strlen(networks[select_network_index].password) > 0)
+                        // loading network list
+                        render_loading_network_text(renderer, font);
+                        pthread_t scan_networks;
+                        pthread_create(&scan_networks, NULL, scan_networks_thread, NULL);
+                        pthread_detach(scan_networks);
+                    }
+                    else if (select_network_index < 0)
+                    {
+                        // needs to select a network
+                        select_network_index = render_select_network(renderer, font, networks, net_count, back_button, retry_button);
+                        printf("Selected network is index: %i => %s\n\n", select_network_index, networks[select_network_index].ssid);
+
+                        for (int i = 0; i < net_count; i++)
                         {
-                            connect_to_network(networks[select_network_index].ssid, networks[select_network_index].password);
+                            SDL_Color color = {255, 255, 255, 255};
+                            SDL_Surface *s = TTF_RenderText_Solid(font, networks[i].ssid, color);
+                            SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
+                            SDL_Rect r = {50, 50 + i * 30, s->w, s->h};
+                            SDL_RenderCopy(renderer, t, NULL, &r);
+                            SDL_FreeSurface(s);
+                            SDL_DestroyTexture(t);
                         }
                     }
-                    else
+                    else if (select_network_index >= 0)
                     {
-                        render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
+                        printf("Selected network is index: %i => %s\n\n", select_network_index, networks[select_network_index].ssid);
+                        // network has been selected. Attempt to connect without password
+                        if (!has_attempted_connection && connect_to_network(networks[select_network_index].ssid, NULL) != 0)
+                        {
+                            has_attempted_connection = 1;
+                            ready_for_password = 1;
+                            
+                            // render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
+                            
+                            if (strlen(networks[select_network_index].password) > 0)
+                            {
+                                connect_to_network(networks[select_network_index].ssid, networks[select_network_index].password);
+                            }
+                        }
                     }
                 }
 
-                if (selected_network != -1)
+                if (select_network_index >= 0 && ready_for_password)
                 {
+                    printf("Wanting password now...\n");
                     char password[128] = "";
-                    enter_password(renderer, font, networks[selected_network].ssid, password, sizeof(password));
-                    connect_to_network(networks[selected_network].ssid, password);
+                    // enter_password(renderer, font, networks[selected_network].ssid, password, sizeof(password));
+                    // connect_to_network(networks[selected_network].ssid, password);
                     selected_network = -1;
                     current_screen = SCREEN_MAIN;
                 }
