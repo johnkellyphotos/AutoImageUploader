@@ -1,0 +1,13 @@
+[Unit]
+Description=Tritium Auto Image Uploader
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/Desktop/AutoImageUploader/gui_uploader
+Restart=on-failure
+User=%i
+WorkingDirectory=%h/Desktop/AutoImageUploader
+
+[Install]
+WantedBy=default.target
