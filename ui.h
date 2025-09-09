@@ -5,12 +5,12 @@
 #include <unistd.h>
 #include "buttons.h"
 
-#define MAX_NETWORKS 4
+#define MAX_NETWORKS 5
 #define MAX_PASSWORD 128
 #define MAX_CMD 512
 
-#define TOP_BAR_HEIGHT 30
-#define UI_PADDING 10
+#define UI_PADDING_TOP 30
+#define UI_PADDING_LEFT 10
 
 // use vilatilie ints because these will be accessed directly without optimization. (variable updated across threads)
 volatile int selected_network = -1;
@@ -98,7 +98,7 @@ void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
 {
     char loading_statement[64] = "Loading networks";
     create_text_with_dynamic_elipsis(loading_statement, 64);
-    render_text(renderer, font, loading_statement, 10, 50);
+    render_text(renderer, font, loading_statement, UI_PADDING_LEFT, UI_PADDING_TOP);
 }
 
 int list_networks(int max)
@@ -219,59 +219,6 @@ void render_button(SDL_Renderer *renderer, TTF_Font *font, Button btn)
 
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
-}
-
-void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
-{
-    SDL_StartTextInput();
-    int done = 0;
-    SDL_Event e;
-    password[0] = 0;
-
-    while (!done && !stop_requested)
-    {
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
-
-        char prompt[256];
-        snprintf(prompt, sizeof(prompt), "Enter password for %s:", ssid);
-        render_text(renderer, font, prompt, 50, 50);
-        render_text(renderer, font, password, 50, 100);
-
-        SDL_RenderPresent(renderer);
-
-        while (SDL_PollEvent(&e))
-        {
-            if (e.type == SDL_QUIT)
-            {
-                stop_requested = 1;
-            }
-
-            if (e.type == SDL_TEXTINPUT)
-            {
-                strncat(password, e.text.text, max_len - strlen(password) - 1);
-            }
-
-            if (e.type == SDL_KEYDOWN)
-            {
-                if (e.key.keysym.sym == SDLK_RETURN)
-                {
-                    done = 1;
-                }
-
-                if (e.key.keysym.sym == SDLK_BACKSPACE)
-                {
-                    int len = strlen(password);
-                    if (len > 0)
-                    {
-                        password[len-1] = 0;
-                    }
-                }
-            }
-        }
-    }
-
-    SDL_StopTextInput();
 }
 
 int mouse_over_button(Button *btn, int mx, int my)
@@ -440,8 +387,8 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font)
     SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    int start_x = UI_PADDING;
-    int y_pos = UI_PADDING;
+    int start_x = UI_PADDING_LEFT;
+    int y_pos = UI_PADDING_LEFT;
 
     SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
@@ -483,14 +430,14 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     int w, h;
     SDL_GetRendererOutputSize(renderer, &w, &h);
 
-    int margin = UI_PADDING;
+    int margin = UI_PADDING_LEFT;
 
     char imported_text[64];
     snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");
     char uploaded_text[64];
     snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", image_status->uploaded, image_status->uploaded == 1 ? "" : "s");
 
-    int y_offset = TOP_BAR_HEIGHT + 20;
+    int y_offset = UI_PADDING_TOP;
     render_text(renderer, font, imported_text, margin, y_offset);
     y_offset += h / 30 + 5;
 
@@ -536,14 +483,14 @@ void render_network_connection_complete_screen(SDL_Renderer * renderer, TTF_Font
     if (network_connect_complete_status < 0)
     {
         strcpy(loading_statement, "Failed to connect to network.");
-        render_text(renderer, font, loading_statement, 10, 50);
+        render_text(renderer, font, loading_statement, UI_PADDING_LEFT, UI_PADDING_TOP);
         render_button(renderer, font, navigation_buttons.back);
         render_button(renderer, font, navigation_buttons.retry);
     }
     else
     {
         strcpy(loading_statement, "Network connection successful.");
-        render_text(renderer, font, loading_statement, 10, 50);
+        render_text(renderer, font, loading_statement, UI_PADDING_LEFT, UI_PADDING_TOP);
         render_button(renderer, font, navigation_buttons.back);
     }
 }
@@ -567,7 +514,7 @@ void render_no_network_found(SDL_Renderer * renderer, TTF_Font * font, Navigatio
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-    SDL_Rect title_rect = {UI_PADDING, TOP_BAR_HEIGHT + 10, title_surf->w, title_surf->h};
+    SDL_Rect title_rect = {UI_PADDING_LEFT, UI_PADDING_TOP, title_surf->w, title_surf->h};
 
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
     SDL_FreeSurface(title_surf);
@@ -593,14 +540,14 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-    SDL_Rect title_rect = {UI_PADDING, TOP_BAR_HEIGHT + 10, title_surf->w, title_surf->h};
+    SDL_Rect title_rect = {UI_PADDING_LEFT, UI_PADDING_TOP, title_surf->w, title_surf->h};
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
     SDL_FreeSurface(title_surf);
     SDL_DestroyTexture(title_tex);
 
     for (int i = 0; i < net_count; i++)
     {
-        SDL_Rect r = {UI_PADDING, TOP_BAR_HEIGHT + select_text_height + i * 40, 320, 30};
+        SDL_Rect r = {UI_PADDING_LEFT, UI_PADDING_TOP + select_text_height + i * 30, 320, 24};
 
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_RenderFillRect(renderer, &r);
@@ -636,7 +583,7 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, loading_statement, white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-    SDL_Rect title_rect = {UI_PADDING, TOP_BAR_HEIGHT + 10, title_surf->w, title_surf->h};
+    SDL_Rect title_rect = {UI_PADDING_LEFT, UI_PADDING_TOP, title_surf->w, title_surf->h};
 
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
     SDL_FreeSurface(title_surf);
