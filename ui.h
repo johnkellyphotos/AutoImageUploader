@@ -221,44 +221,6 @@ void render_button(SDL_Renderer *renderer, TTF_Font *font, Button btn)
     SDL_DestroyTexture(texture);
 }
 
-int mouse_over_button(Button *btn, int mx, int my)
-{
-    return mx >= btn->x && mx <= btn->x + btn->w && my >= btn->y && my <= btn->y + btn->h;
-}
-
-void kill_camera_users() 
-{
-    libusb_context *ctx;
-    libusb_device **list;
-    ssize_t cnt;
-    libusb_init(&ctx);
-    cnt = libusb_get_device_list(ctx, &list);
-
-    for (ssize_t i = 0; i < cnt; i++)
-    {
-        struct libusb_device_descriptor desc;
-        libusb_get_device_descriptor(list[i], &desc);
-        if (desc.idVendor == 0x04b0 && desc.idProduct == 0x043a)
-        {
-            uint8_t bus = libusb_get_bus_number(list[i]);
-            uint8_t addr = libusb_get_device_address(list[i]);
-            char cmd[256];
-            snprintf(cmd, sizeof(cmd), "fuser -k /dev/bus/usb/%03d/%03d", bus, addr);
-            system(cmd);
-        }
-    }
-
-    libusb_free_device_list(list, 1);
-    libusb_exit(ctx);
-}
-
-void handle_sigint(int sig)
-{
-    _log("Logging signal interrupt: %i", sig);
-    stop_requested = 1;
-    kill_camera_users();
-}
-
 void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_height, int total_width, int strength_percent)
 {
     int bars = 4;
@@ -639,7 +601,6 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
 
     render_button(renderer, font, navigation_buttons.back);
 }
-
 
 void render_network_config_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
 {

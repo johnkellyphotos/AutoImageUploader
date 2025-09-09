@@ -26,6 +26,39 @@ GPContext *global_context = NULL;
 volatile int camera_initialized = 0;
 volatile int camera_busy_flag = 0;
 
+void kill_camera_users() 
+{
+    libusb_context *ctx;
+    libusb_device **list;
+    ssize_t cnt;
+    libusb_init(&ctx);
+    cnt = libusb_get_device_list(ctx, &list);
+
+    for (ssize_t i = 0; i < cnt; i++)
+    {
+        struct libusb_device_descriptor desc;
+        libusb_get_device_descriptor(list[i], &desc);
+        if (desc.idVendor == 0x04b0 && desc.idProduct == 0x043a)
+        {
+            uint8_t bus = libusb_get_bus_number(list[i]);
+            uint8_t addr = libusb_get_device_address(list[i]);
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "fuser -k /dev/bus/usb/%03d/%03d", bus, addr);
+            system(cmd);
+        }
+    }
+
+    libusb_free_device_list(list, 1);
+    libusb_exit(ctx);
+}
+
+void handle_sigint(int sig)
+{
+    _log("Logging signal interrupt: %i", sig);
+    stop_requested = 1;
+    kill_camera_users();
+}
+
 void list_files_recursive(const char *folder)
 {
     _log("Recursively entering folder: %s", folder);
