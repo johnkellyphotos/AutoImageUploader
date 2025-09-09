@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Wpedantic `sdl2-config --cflags`
-LDFLAGS = `sdl2-config --libs` -lSDL2_ttf -lpthread -lcurl -ljson-c -lusb-1.0 -lgphoto2
+CFLAGS = -Wall -Wextra -Wpedantic -Wno-pedantic `sdl2-config --cflags` $(shell pkg-config --cflags libnm glib-2.0)
+LDFLAGS = `sdl2-config --libs` -lSDL2_ttf -lpthread -lcurl -ljson-c -lusb-1.0 -lgphoto2 $(shell pkg-config --libs libnm glib-2.0)
 
 all: uploader_gui
 

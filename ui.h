@@ -1,9 +1,11 @@
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <signal.h>
 #include <libusb-1.0/libusb.h>
 #include <unistd.h>
 #include "buttons.h"
 
-#define MAX_NETWORKS 3
+#define MAX_NETWORKS 4
 #define MAX_PASSWORD 128
 #define MAX_CMD 512
 
@@ -19,13 +21,21 @@ volatile int networks_ready = 0;
 volatile int networks_scanned = 0;
 volatile int select_network_index = -1;
 volatile int has_attempted_connection = 0;
-volatile int ready_for_password = 0;
 volatile int camera_found = 0;
+
+pid_t conn_pid = 0;
+int conn_status = -1;
+
+typedef struct {
+    volatile int x;
+    volatile int y;
+} LastClick;
+
+LastClick last_click = {0, 0};
 
 typedef struct
 {
     char ssid[128];
-    char password[128];
 } WifiNetwork;
 
 WifiNetwork networks[MAX_NETWORKS];
@@ -152,20 +162,32 @@ void clip_string(char *dest, const char *src, int n)
     dest[i] = '\0';
 }
 
-int connect_to_network(const char *ssid, const char *password)
+int connect_to_network(const char *ssid)
 {
-    char cmd[512];
-    if (password && strlen(password) > 0)
+    pid_t pid = fork();
+    if (pid < 0)
     {
-        snprintf(cmd, sizeof(cmd), "nmcli device wifi connect '%s' password '%s'", ssid, password);
+        return -1;
     }
+    if (pid == 0)
+    {
+        execlp("nmcli", "nmcli", "device", "wifi", "connect", ssid, NULL);
+        _exit(127);
+    } 
     else
     {
-        snprintf(cmd, sizeof(cmd), "nmcli device wifi connect '%s'", ssid);
-    }
+        int status;
+        waitpid(pid, &status, 0);
 
-    int ret = system(cmd);
-    return WEXITSTATUS(ret);
+        if (WIFEXITED(status))
+        {
+            return WEXITSTATUS(status);
+        }
+        else
+        {
+            return -1;
+        }
+    }
 }
 
 void render_button(SDL_Renderer *renderer, TTF_Font *font, Button btn)
@@ -492,55 +514,6 @@ void render_header(SDL_Renderer *renderer, TTF_Font *font)
     render_connection_status(renderer, font);   
 }
 
-int render_password_prompt(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
-{
-    return 0;
-    SDL_StartTextInput();
-    int done = 0;
-    SDL_Event e;
-    password[0] = 0;
-
-    while (!done && !stop_requested)
-    {
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
-
-        char prompt[256];
-        snprintf(prompt, sizeof(prompt), "Enter password for %s:", ssid);
-        render_text(renderer, font, prompt, 50, 50);
-
-        char masked[MAX_PASSWORD];
-        int len = strlen(password);
-        if (len > 0) memset(masked, '*', len);
-        masked[len] = 0;
-        render_text(renderer, font, masked, 50, 100);
-
-        SDL_RenderPresent(renderer);
-
-        while (SDL_PollEvent(&e))
-        {
-            if (e.type == SDL_QUIT) stop_requested = 1;
-
-            if (e.type == SDL_TEXTINPUT)
-                strncat(password, e.text.text, max_len - strlen(password) - 1);
-
-            if (e.type == SDL_KEYDOWN)
-            {
-                if (e.key.keysym.sym == SDLK_RETURN) done = 1;
-                if (e.key.keysym.sym == SDLK_BACKSPACE)
-                {
-                    int l = strlen(password);
-                    if (l > 0) password[l-1] = 0;
-                }
-            }
-        }
-        SDL_Delay(16);
-    }
-
-    SDL_StopTextInput();
-    return done;
-}
-
 void render_main_screen(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_status, Navigation_buttons navigation_buttons)
 {
     render_status_box(renderer, font, image_status);
@@ -583,12 +556,11 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
 {
     if (net_count < 1)
     {
-        render_no_network_found(renderer, font, navigation_buttons);
         select_network_index = -1;
+        render_no_network_found(renderer, font, navigation_buttons);
         return;
     }
 
-    SDL_Rect net_rects[MAX_NETWORKS];
     int select_text_height = 30;
 
     SDL_Color white = {255, 255, 255, 255};
@@ -602,7 +574,6 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
     for (int i = 0; i < net_count; i++)
     {
         SDL_Rect r = {UI_PADDING, TOP_BAR_HEIGHT + select_text_height + i * 40, 320, 30};
-        net_rects[i] = r;
 
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_RenderFillRect(renderer, &r);
@@ -617,64 +588,101 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
         SDL_RenderCopy(renderer, t, NULL, &dst);
         SDL_FreeSurface(s);
         SDL_DestroyTexture(t);
+
+        if (last_click.x >= r.x && last_click.x <= r.x + r.w && last_click.y >= r.y && last_click.y <= r.y + r.h)
+        {
+            select_network_index = i;
+        }
     }
 
     render_button(renderer, font, navigation_buttons.back);
     SDL_RenderPresent(renderer);
-    select_network_index = -1;
 }
 
-void render_attempting_network_connection_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Font *font, Navigation_buttons navigation_buttons)
 {
-    if (!has_attempted_connection && connect_to_network(networks[select_network_index].ssid, NULL) != 0)
+    char dots[5] = {0};
+    for (int x = 0; x < number_dots_for_loading_screen && x < 4; x++)
     {
-        printf("Network connection attempted...\n");exit(1);
+        dots[x] = '.';
+    }
+
+    if (screen_refresh_count++ > 30)
+    {
+        number_dots_for_loading_screen = (number_dots_for_loading_screen >= 4) ? 1 : number_dots_for_loading_screen + 1;
+        screen_refresh_count = 0;
+    }
+
+    char loading_statement[64];
+    snprintf(loading_statement, sizeof(loading_statement), "Attempting to connect to network%s", dots);
+
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *title_surf = TTF_RenderText_Solid(font, loading_statement, white);
+    SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
+    SDL_Rect title_rect = {UI_PADDING, TOP_BAR_HEIGHT + 10, title_surf->w, title_surf->h};
+
+    SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
+    SDL_FreeSurface(title_surf);
+    SDL_DestroyTexture(title_tex);
+    SDL_RenderPresent(renderer);
+
+    if (!has_attempted_connection)
+    {
         has_attempted_connection = 1;
-        ready_for_password = 1;
-        
-        render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
-        
-        if (strlen(networks[select_network_index].password) > 0)
+        conn_pid = fork();
+        if (conn_pid == 0)
         {
-            connect_to_network(networks[select_network_index].ssid, networks[select_network_index].password);
+            // call the existing blocking function in the child
+            int ret = connect_to_network(networks[select_network_index].ssid);
+            _exit(ret);
         }
     }
-        printf("Network connection NOT attempted...\n");exit(1);
+
+    if (conn_pid > 0)
+    {
+        int status;
+        pid_t result = waitpid(conn_pid, &status, WNOHANG);
+        if (result > 0)
+        {
+            if (WIFEXITED(status))
+            {
+                conn_status = WEXITSTATUS(status);
+            }
+            
+            conn_pid = 0;
+            networks_ready = 0;
+            select_network_index = -1;
+            current_screen = SCREEN_MAIN; // leave page regardless of success
+
+            if (conn_status != 0)
+            {
+                _log("Network connection failed: %d\n", conn_status);
+            }
+            else
+            {
+                _log("Network connected successfully\n");
+            }
+        }
+    }
 
     render_button(renderer, font, navigation_buttons.back);
 }
 
+
 void render_network_config_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
 {
-    if (!ready_for_password)
+
+    if (!networks_ready)
     {
-        if (!networks_ready)
-        {
-            render_loading_network_list_screen(renderer, font, navigation_buttons);
-        }
-        else if (select_network_index < 0)
-        {
-            render_select_network_screen(renderer, font, navigation_buttons);
-            
-        }
-        else if (select_network_index >= 0)
-        {
-            render_attempting_network_connection_screen(renderer, font, navigation_buttons);
-        }
+        render_loading_network_list_screen(renderer, font, navigation_buttons);
     }
-    else if (select_network_index >= 0 && ready_for_password)
+    else if (select_network_index < 0)
     {
-        printf("Wanting password now...\n");
-        char password[128] = "";
-        // enter_password(renderer, font, networks[selected_network].ssid, password, sizeof(password));
-        // connect_to_network(networks[selected_network].ssid, password);
-        selected_network = -1;
-        current_screen = SCREEN_MAIN;
+        render_select_network_screen(renderer, font, navigation_buttons);
     }
-    else
+    else if (select_network_index >= 0)
     {
-        _log("Default condition hit for network config screen."); // problably a bug? Maybe a race condition?
-        render_loading_network_list_screen(renderer, font, navigation_buttons);   
+        render_attempting_network_connection_screen(renderer, font, navigation_buttons);
     }
 }
 
@@ -713,28 +721,31 @@ void handle_events(SDL_Event e, Navigation_buttons navigation_buttons)
         // determine if a button was clicked
         if (e.type == SDL_MOUSEBUTTONDOWN)
         {
-            int mx = e.button.x;
-            int my = e.button.y;
+            last_click.x = e.button.x;
+            last_click.y = e.button.y;
 
             switch (current_screen)
             {
                 case SCREEN_MAIN:
-                    if (navigation_button_is_pressed(navigation_buttons.select_network, mx, my))
+                    if (navigation_button_is_pressed(navigation_buttons.select_network, last_click.x, last_click.y))
                     {
                         current_screen = navigation_buttons.select_network.target_screen;
                     }
-                    else if (navigation_button_is_pressed(navigation_buttons.clear_import, mx, my))
+                    else if (navigation_button_is_pressed(navigation_buttons.clear_import, last_click.x, last_click.y))
                     {
                         current_screen = navigation_buttons.clear_import.target_screen;
                     }
                     break;
 
                 case SCREEN_NETWORK_CONFIG:
-                    if (navigation_button_is_pressed(navigation_buttons.back, mx, my))
+                    if (navigation_button_is_pressed(navigation_buttons.back, last_click.x, last_click.y))
                     {
+                        networks_ready = 0;
+                        networks_scanned = 0; // reset network scan status
+                        select_network_index = -1;
                         current_screen = navigation_buttons.back.target_screen;
                     }
-                    else if (navigation_button_is_pressed(navigation_buttons.retry, mx, my))
+                    else if (navigation_button_is_pressed(navigation_buttons.retry, last_click.x, last_click.y))
                     {
                         current_screen = navigation_buttons.retry.target_screen;
                     }

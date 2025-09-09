@@ -4,6 +4,7 @@
 sudo apt update
 sudo apt upgrade -y
 sudo apt install -y libsdl2-dev libsdl2-ttf-dev libusb-1.0-0-dev libjson-c-dev libgphoto2-dev gphoto2
+sudo apt install 
 
 # Set Raspberry Pi to autologin to desktop
 sudo sed -i '/^\[Seat:\*\]/a autologin-user=pi\nautologin-session=lightdm-autologin' /etc/lightdm/lightdm.conf 2>/dev/null
