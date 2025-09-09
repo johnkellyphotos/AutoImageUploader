@@ -5,7 +5,13 @@
 #include <string.h>
 #include <pthread.h>
 
+const char *LOCAL_DIR;
+const char *TRACK_FILE = ".track.txt";
+const char *FTP_URL;
+const char *FTP_USERPWD;
+
 #include "log.h"
+#include "support.h"
 #include "ui.h"
 #include "uploader.h"
 

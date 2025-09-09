@@ -31,6 +31,7 @@ volatile int has_attempted_connection = 0;
 volatile int network_connect_complete_status = 0;
 volatile int network_connect_complete = 0;
 volatile int camera_found = 0;
+volatile int clear_all_imports = 0;
 
 pid_t conn_pid = 0;
 int conn_status = -1;
@@ -68,6 +69,17 @@ int navigation_button_is_pressed(Button button, int mx, int my)
 {
     // checks if the click event occured inside the boundaries of the button. Does not know Z-index.
     return mx >= button.x && mx <= button.x + button.w && my >= button.y && my <= button.y + button.h;
+}
+
+void render_wrappable_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, int wrap_width)
+{
+    SDL_Color color = {255, 255, 255, 255};
+    SDL_Surface *surf = TTF_RenderText_Blended_Wrapped(font, text, color, wrap_width);
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+    SDL_Rect dst = {x, y, surf->w, surf->h};
+    SDL_RenderCopy(renderer, tex, NULL, &dst);
+    SDL_FreeSurface(surf);
+    SDL_DestroyTexture(tex);
 }
 
 void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) 
@@ -620,6 +632,59 @@ void render_network_config_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
     }
 }
 
+void render_clear_imports_confirmation_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    char confirmation_text[] = "Are you sure you want to clear all imports?";
+    render_text(renderer, font, confirmation_text, ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height + (ui_parameters.font_size / 25));
+
+    int base_height = (2 * ui_parameters.ui_top_bar_height) + ui_parameters.font_size + 2 * (ui_parameters.font_size / 25);
+
+    char warning_text[] = "WARNING - click 'Clear all' to:";
+    render_text(renderer, font, warning_text, ui_parameters.ui_padding_left, base_height);
+
+    const char *warning_instructions[] = {
+        "- Delete all imported images from this device;",
+        "- Delete track file of uploaded images;",
+        "- Delete logs associated with this session."
+    };
+
+    int offset_top = base_height + ui_parameters.font_size + (ui_parameters.font_size / 25);
+    int number_entries = sizeof(warning_instructions)/sizeof(warning_instructions[0]);
+    int i = 0;
+
+    for (i = 0; i < number_entries; i++)
+    {
+        offset_top = base_height + ((i + 1) * ui_parameters.font_size) + (1 + i) * (ui_parameters.font_size / 25);
+        render_text(renderer, font, warning_instructions[i], ui_parameters.ui_padding_left * 2, offset_top);
+    }
+
+    i++;
+    offset_top = base_height + ((i + 1) * ui_parameters.font_size) + (1 + i) * (ui_parameters.font_size / 25);
+
+    char final_warning_text[] = "This action can not be undone. Ensure your images are retained off device before deleting. If a camera is still attached, or becomes reattached, any images will be re-imported and upload.";
+    render_wrappable_text(renderer, font, final_warning_text, ui_parameters.ui_padding_left, offset_top, ui_parameters.ui_padding_left * 48);
+
+    render_button(renderer, font, navigation_buttons.back);
+    render_button(renderer, font, navigation_buttons.confirm_clear_imports);
+}
+
+void render_clear_imports_complete_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    if (clear_all_imports)
+    {
+        clear_all_imports = 0;
+        delete_images_in_import_folder();
+        clear_track_file();
+        clear_log_file();
+        _log("Log file cleared by user.");
+    }
+
+    char confirmation_text[] = "Imported images have been deleted from device.";
+    render_text(renderer, font, confirmation_text, ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height + (ui_parameters.font_size / 25));
+    
+    render_button(renderer, font, navigation_buttons.back);
+}
+
 void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_status, Navigation_buttons navigation_buttons)
 {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -635,6 +700,14 @@ void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_s
 
         case SCREEN_NETWORK_CONFIG:
             render_network_config_screen(renderer, font, navigation_buttons);
+            break;
+
+        case SCREEN_CLEAR_IMPORTS_CONFIRMATION:
+            render_clear_imports_confirmation_screen(renderer, font, navigation_buttons);
+            break;
+
+        case SCREEN_CLEAR_IMPORTS_COMPLETE:
+            render_clear_imports_complete_screen(renderer, font, navigation_buttons);
             break;
     }
 
@@ -686,6 +759,27 @@ void handle_events(SDL_Event e, Navigation_buttons navigation_buttons)
                         current_screen = navigation_buttons.retry.target_screen;
                     }
                     break;
+
+                case SCREEN_CLEAR_IMPORTS_CONFIRMATION:
+                    if (navigation_button_is_pressed(navigation_buttons.back, last_click.x, last_click.y))
+                    {
+                        clear_all_imports = 0;
+                        current_screen = navigation_buttons.back.target_screen;
+                    }
+                    else if (navigation_button_is_pressed(navigation_buttons.confirm_clear_imports, last_click.x, last_click.y))
+                    {
+                        clear_all_imports = 1;
+                        current_screen = navigation_buttons.confirm_clear_imports.target_screen;
+                    }
+                    break;
+
+                case SCREEN_CLEAR_IMPORTS_COMPLETE:
+                    if (navigation_button_is_pressed(navigation_buttons.back, last_click.x, last_click.y))
+                    {
+                        clear_all_imports = 0;
+                        current_screen = navigation_buttons.back.target_screen;
+                    }
+                    break;
             }
         }
     }
@@ -713,7 +807,7 @@ void run_UI(ImageStatus *image_status, int full_screen_mode)
     ui_parameters.font_size = screen_height / 20;
     ui_parameters.ui_padding_top = screen_width / 50; // font size + 2%
     ui_parameters.ui_padding_left = screen_width / 50; // 2%
-    ui_parameters.ui_top_bar_height = ui_parameters.ui_padding_top + ui_parameters.font_size + (ui_parameters.font_size / 25);
+    ui_parameters.ui_top_bar_height = ui_parameters.ui_padding_top + ui_parameters.font_size + (ui_parameters.font_size / 4);
 
     TTF_Font *font = TTF_OpenFont("Rubik/Rubik-VariableFont_wght.ttf", ui_parameters.font_size);
     if (!font)

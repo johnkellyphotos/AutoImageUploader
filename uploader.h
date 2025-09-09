@@ -12,11 +12,6 @@
 #include <gphoto2/gphoto2-camera.h>
 #include <gphoto2/gphoto2-context.h>
 
-const char *LOCAL_DIR;
-const char *TRACK_FILE = ".track.txt";
-const char *FTP_URL;
-const char *FTP_USERPWD;
-
 pthread_mutex_t track_file_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t camera_mutex = PTHREAD_MUTEX_INITIALIZER;
 
