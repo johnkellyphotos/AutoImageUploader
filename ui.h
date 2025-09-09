@@ -21,6 +21,8 @@ volatile int networks_ready = 0;
 volatile int networks_scanned = 0;
 volatile int select_network_index = -1;
 volatile int has_attempted_connection = 0;
+volatile int network_connect_complete_status = 0;
+volatile int network_connect_complete = 0;
 volatile int camera_found = 0;
 
 pid_t conn_pid = 0;
@@ -528,6 +530,24 @@ void render_main_screen(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *i
     render_button(renderer, font, navigation_buttons.clear_import);
 }
 
+void render_network_connection_complete_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    char loading_statement[64];
+    if (network_connect_complete_status < 0)
+    {
+        strcpy(loading_statement, "Failed to connect to network.");
+        render_text(renderer, font, loading_statement, 10, 50);
+        render_button(renderer, font, navigation_buttons.back);
+        render_button(renderer, font, navigation_buttons.retry);
+    }
+    else
+    {
+        strcpy(loading_statement, "Network connection successful.");
+        render_text(renderer, font, loading_statement, 10, 50);
+        render_button(renderer, font, navigation_buttons.back);
+    }
+}
+
 void render_loading_network_list_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
 {
     render_loading_network_text(renderer, font);
@@ -626,11 +646,14 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
     if (!has_attempted_connection)
     {
         _log("Attempting to connect to network...");
+        network_connect_complete_status = 0;
+        network_connect_complete = 0;
         has_attempted_connection = 1;
         conn_pid = fork();
         if (conn_pid == 0)
         {
             // call the existing blocking function in the child
+            _log("Connection attempt initiated.");
             int ret = connect_to_network(networks[select_network_index].ssid);
             _exit(ret);
         }
@@ -648,19 +671,22 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
             }
 
             conn_pid = 0;
-            networks_ready = 0;
-            select_network_index = -1;
-            has_attempted_connection = 0;
-            current_screen = SCREEN_MAIN; // leave page regardless of success
 
             if (conn_status != 0)
             {
                 _log("Network connection failed: %d\n", conn_status);
+                network_connect_complete_status = -1;
             }
             else
             {
                 _log("Network connected successfully\n");
+                network_connect_complete_status = 1;
             }
+
+            network_connect_complete = 1;
+            networks_ready = 0;
+            select_network_index = -1;
+            has_attempted_connection = 0;
         }
     }
 
@@ -670,8 +696,11 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
 
 void render_network_config_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
 {
-
-    if (!networks_ready)
+    if (network_connect_complete == 1 && network_connect_complete_status != 0)
+    {
+        render_network_connection_complete_screen(renderer, font, navigation_buttons);
+    }
+    else if (!networks_ready)
     {
         render_loading_network_list_screen(renderer, font, navigation_buttons);
     }
@@ -679,7 +708,7 @@ void render_network_config_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
     {
         render_select_network_screen(renderer, font, navigation_buttons);
     }
-    else if (select_network_index >= 0)
+    else if (select_network_index >= 0 && network_connect_complete == 0)
     {
         render_attempting_network_connection_screen(renderer, font, navigation_buttons);
     }
@@ -742,6 +771,8 @@ void handle_events(SDL_Event e, Navigation_buttons navigation_buttons)
                         networks_ready = 0;
                         networks_scanned = 0; // reset network scan status
                         select_network_index = -1;
+                        network_connect_complete = 0;
+                        network_connect_complete_status = 0;
                         current_screen = navigation_buttons.back.target_screen;
                     }
                     else if (navigation_button_is_pressed(navigation_buttons.retry, last_click.x, last_click.y))
