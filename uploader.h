@@ -22,6 +22,7 @@ pthread_mutex_t camera_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 Camera *global_camera = NULL;
 GPContext *global_context = NULL;
+
 volatile int camera_initialized = 0;
 volatile int camera_busy_flag = 0;
 
@@ -100,7 +101,6 @@ void list_files_recursive(const char *folder)
     }
     gp_list_free(files);
 }
-
 
 void camera_init_global()
 {

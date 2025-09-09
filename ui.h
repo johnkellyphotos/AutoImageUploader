@@ -1,11 +1,16 @@
 #include <signal.h>
 #include <libusb-1.0/libusb.h>
 #include <unistd.h>
+#include "buttons.h"
 
 #define MAX_NETWORKS 3
 #define MAX_PASSWORD 128
 #define MAX_CMD 512
 
+#define TOP_BAR_HEIGHT 30
+#define UI_PADDING 10
+
+// use vilatilie ints because these will be accessed directly without optimization. (variable updated across threads)
 volatile int selected_network = -1;
 volatile int net_count = 0;
 volatile int link_strength_value = 0;
@@ -32,18 +37,6 @@ typedef struct
     int status; // 0 = waiting, 1 = importing, 2 = uploading, 3 = No internet, import only
 } ImageStatus;
 
-typedef struct
-{
-    int x, y, w, h;
-    const char *label;
-} Button;
-
-typedef enum
-{ 
-    SCREEN_MAIN, 
-    SCREEN_NETWORK_CONFIG
-} Screen;
-
 volatile sig_atomic_t stop_requested = 0;
 
 Screen current_screen = SCREEN_MAIN;
@@ -51,7 +44,7 @@ Screen current_screen = SCREEN_MAIN;
 int number_dots_for_loading_screen = 1;
 int screen_refresh_count = 0;
 
-int button_is_pressed(Button button, int mx, int my)
+int navigation_button_is_pressed(Button button, int mx, int my)
 {
     // checks if the click event occured inside the boundaries of the button. Does not know Z-index.
     return mx >= button.x && mx <= button.x + button.w && my >= button.y && my <= button.y + button.h;
@@ -175,9 +168,9 @@ int connect_to_network(const char *ssid, const char *password)
     return WEXITSTATUS(ret);
 }
 
-void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn)
+void render_button(SDL_Renderer *renderer, TTF_Font *font, Button btn)
 {
-    SDL_Rect rect = {btn->x, btn->y, btn->w, btn->h};
+    SDL_Rect rect = {btn.x, btn.y, btn.w, btn.h};
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
     SDL_RenderFillRect(renderer, &rect);
 
@@ -185,135 +178,16 @@ void render_button(SDL_Renderer *renderer, TTF_Font *font, Button *btn)
     SDL_RenderDrawRect(renderer, &rect);
 
     SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *surface = TTF_RenderText_Solid(font, btn->label, white);
+    SDL_Surface *surface = TTF_RenderText_Solid(font, btn.label, white);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    int tx = btn->x + (btn->w - surface->w) / 2;
-    int ty = btn->y + (btn->h - surface->h) / 2;
+    int tx = btn.x + (btn.w - surface->w) / 2;
+    int ty = btn.y + (btn.h - surface->h) / 2;
     SDL_Rect dst = {tx, ty, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
 
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
-}
-
-int render_select_network(SDL_Renderer *renderer, TTF_Font *font, WifiNetwork networks[], int net_count, Button back_button, Button retry_button)
-{
-    int selected = -1;
-    SDL_Event e;
-    SDL_Rect net_rects[MAX_NETWORKS];
-
-    int screen_width, screen_height;
-    SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
-
-    while (!stop_requested && selected == -1)
-    {
-        SDL_Rect clear_area = {0, 40, screen_width, screen_height - 40 - 60};
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderFillRect(renderer, &clear_area);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-
-        int top_margin = 30, left_margin = 20, select_text_height = 30;
-        SDL_Color white = {255, 255, 255, 255};
-
-        if (net_count < 1)
-        {
-            SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", white);
-            SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-            SDL_Rect title_rect = {left_margin, top_margin + 20, title_surf->w, title_surf->h};
-            SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
-            SDL_FreeSurface(title_surf);
-            SDL_DestroyTexture(title_tex);
-
-            // add back and retry button
-            render_button(renderer, font, &back_button);
-            render_button(renderer, font, &retry_button);
-
-            return -1;
-        }
-
-        SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
-        SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-        SDL_Rect title_rect = {left_margin, top_margin, title_surf->w, title_surf->h};
-        SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
-        SDL_FreeSurface(title_surf);
-        SDL_DestroyTexture(title_tex);
-
-        int mx, my;
-        SDL_GetMouseState(&mx, &my);
-
-        for (int i = 0; i < net_count; i++)
-        {
-            SDL_Rect r = {left_margin, top_margin + select_text_height + i * 40, 320, 30};
-            net_rects[i] = r;
-
-            SDL_Color bg = {40, 40, 40, 255};
-            if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h)
-            {
-                bg = (SDL_Color){70, 70, 70, 255};
-            }
-
-            SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, 255);
-            SDL_RenderFillRect(renderer, &r);
-
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            SDL_RenderDrawRect(renderer, &r);
-
-            char network_name[32];
-            clip_string(network_name, networks[i].ssid, 32);
-            
-            SDL_Surface *s = TTF_RenderText_Solid(font, network_name, (SDL_Color){255,255,255,255});
-            SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
-            SDL_Rect dst = {r.x + 10, r.y + (r.h - s->h)/2, s->w, s->h};
-            SDL_RenderCopy(renderer, t, NULL, &dst);
-            SDL_FreeSurface(s);
-            SDL_DestroyTexture(t);
-        }
-
-        // add back and retry button
-        render_button(renderer, font, &back_button);
-
-        SDL_RenderPresent(renderer);
-
-        while (SDL_PollEvent(&e))
-        {
-            if (e.type == SDL_QUIT)
-            {
-                return -1;
-            }
-
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
-            {
-
-                int mx = e.button.x, my = e.button.y;
-
-                if (button_is_pressed(back_button, mx, my))
-                {
-                    current_screen = SCREEN_MAIN;
-                    has_attempted_connection = 0;
-                    select_network_index = -1;
-                    networks_ready = 0;
-                    ready_for_password = 0;
-                    networks_scanned = 0;
-                    return -1;
-                }
-
-                for (int i = 0; i < net_count; i++)
-                {
-                    if (mx >= net_rects[i].x && mx <= net_rects[i].x + net_rects[i].w &&
-                        my >= net_rects[i].y && my <= net_rects[i].y + net_rects[i].h)
-                    {
-                        selected = i;
-                        break;
-                    }
-                }
-            }
-        }
-
-        SDL_Delay(16); // just under 60 frames per second
-    }
-
-    return selected;
 }
 
 void enter_password(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
@@ -407,65 +281,6 @@ void handle_sigint(int sig)
     kill_camera_users();
 }
 
-void setup_config_buttons(int screen_w, int screen_h, Button *back_button)
-{
-    int margin = screen_w / 50;
-    int spacing = screen_w / 50;
-    int btn_w = (screen_w - margin*2 - spacing) / 2;
-    int btn_h = screen_h / 5;
-    int y = screen_h - btn_h - margin;
-
-    back_button->x = margin;
-    back_button->y = y;
-    back_button->w = btn_w;
-    back_button->h = btn_h;
-    back_button->label = "Back";
-}
-
-void render_buttons(SDL_Renderer *renderer, TTF_Font *font, Button buttons[], int count)
-{
-    for (int i = 0; i < count; i++)
-    {
-        render_button(renderer, font, &buttons[i]);
-    }
-}
-
-void setup_retry_button(int screen_w, int screen_h, Button *retry_button)
-{
-    int margin = screen_w / 50;
-    int spacing = screen_w / 50;
-    int btn_w = (screen_w - margin*2 - spacing) / 2;
-    int btn_h = screen_h / 5;
-    int y = screen_h - btn_h - margin;
-
-    retry_button->x = margin + btn_w + spacing;
-    retry_button->y = y;
-    retry_button->w = btn_w;
-    retry_button->h = btn_h;
-    retry_button->label = "Retry";
-}
-
-void setup_buttons(int screen_w, int screen_h, Button buttons[])
-{
-    int margin = screen_w / 50;
-    int spacing = screen_w / 50;
-    int btn_w = (screen_w - margin*2 - spacing) / 2;
-    int btn_h = screen_h / 5;
-    int y = screen_h - btn_h - margin;
-
-    buttons[0].x = margin;
-    buttons[0].y = y;
-    buttons[0].w = btn_w;
-    buttons[0].h = btn_h;
-    buttons[0].label = "Select a network";
-
-    buttons[1].x = margin + btn_w + spacing;
-    buttons[1].y = y;
-    buttons[1].w = btn_w;
-    buttons[1].h = btn_h;
-    buttons[1].label = "Clear imports";
-}
-
 void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_height, int total_width, int strength_percent)
 {
     int bars = 4;
@@ -498,6 +313,11 @@ void render_signal_indicator(SDL_Renderer *renderer, int x, int y, int total_hei
 
 int get_link_strength()
 {
+    if (!internet_up)
+    {
+        return 0;
+    }
+
     FILE *f = fopen("/proc/net/wireless", "r");
     if (!f)
     {
@@ -589,8 +409,8 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font)
     SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    int start_x = 10;
-    int y_pos = 10;
+    int start_x = UI_PADDING;
+    int y_pos = UI_PADDING;
 
     SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
@@ -632,14 +452,14 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     int w, h;
     SDL_GetRendererOutputSize(renderer, &w, &h);
 
-    int margin = 20;
+    int margin = UI_PADDING;
 
     char imported_text[64];
     snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");
     char uploaded_text[64];
     snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", image_status->uploaded, image_status->uploaded == 1 ? "" : "s");
 
-    int y_offset = 100;
+    int y_offset = TOP_BAR_HEIGHT + 20;
     render_text(renderer, font, imported_text, margin, y_offset);
     y_offset += h / 30 + 5;
 
@@ -674,6 +494,7 @@ void render_header(SDL_Renderer *renderer, TTF_Font *font)
 
 int render_password_prompt(SDL_Renderer *renderer, TTF_Font *font, const char *ssid, char *password, int max_len)
 {
+    return 0;
     SDL_StartTextInput();
     int done = 0;
     SDL_Event e;
@@ -720,7 +541,144 @@ int render_password_prompt(SDL_Renderer *renderer, TTF_Font *font, const char *s
     return done;
 }
 
-void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus * image_status, Button buttons[], Button back_button, Button retry_button)
+void render_main_screen(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_status, Navigation_buttons navigation_buttons)
+{
+    render_status_box(renderer, font, image_status);
+    render_button(renderer, font, navigation_buttons.select_network);
+    render_button(renderer, font, navigation_buttons.clear_import);
+}
+
+void render_loading_network_list_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    render_loading_network_text(renderer, font);
+    if (!networks_scanned)
+    {
+        networks_scanned = 1;
+        pthread_t scan_networks;
+        pthread_create(&scan_networks, NULL, scan_networks_thread, NULL);
+        pthread_detach(scan_networks);
+    }
+
+    render_button(renderer, font, navigation_buttons.back);
+}
+
+void render_no_network_found(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", white);
+    SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
+    SDL_Rect title_rect = {UI_PADDING, TOP_BAR_HEIGHT + 10, title_surf->w, title_surf->h};
+
+    SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
+    SDL_FreeSurface(title_surf);
+    SDL_DestroyTexture(title_tex);
+
+    render_button(renderer, font, navigation_buttons.back);
+    render_button(renderer, font, navigation_buttons.retry);
+
+    SDL_RenderPresent(renderer);
+}
+
+void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    if (net_count < 1)
+    {
+        render_no_network_found(renderer, font, navigation_buttons);
+        select_network_index = -1;
+        return;
+    }
+
+    SDL_Rect net_rects[MAX_NETWORKS];
+    int select_text_height = 30;
+
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
+    SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
+    SDL_Rect title_rect = {UI_PADDING, TOP_BAR_HEIGHT + 10, title_surf->w, title_surf->h};
+    SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
+    SDL_FreeSurface(title_surf);
+    SDL_DestroyTexture(title_tex);
+
+    for (int i = 0; i < net_count; i++)
+    {
+        SDL_Rect r = {UI_PADDING, TOP_BAR_HEIGHT + select_text_height + i * 40, 320, 30};
+        net_rects[i] = r;
+
+        SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
+        SDL_RenderFillRect(renderer, &r);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderDrawRect(renderer, &r);
+
+        char network_name[32];
+        clip_string(network_name, networks[i].ssid, 32);
+        SDL_Surface *s = TTF_RenderText_Solid(font, network_name, white);
+        SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
+        SDL_Rect dst = {r.x + 10, r.y + (r.h - s->h)/2, s->w, s->h};
+        SDL_RenderCopy(renderer, t, NULL, &dst);
+        SDL_FreeSurface(s);
+        SDL_DestroyTexture(t);
+    }
+
+    render_button(renderer, font, navigation_buttons.back);
+    SDL_RenderPresent(renderer);
+    select_network_index = -1;
+}
+
+void render_attempting_network_connection_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    if (!has_attempted_connection && connect_to_network(networks[select_network_index].ssid, NULL) != 0)
+    {
+        printf("Network connection attempted...\n");exit(1);
+        has_attempted_connection = 1;
+        ready_for_password = 1;
+        
+        render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
+        
+        if (strlen(networks[select_network_index].password) > 0)
+        {
+            connect_to_network(networks[select_network_index].ssid, networks[select_network_index].password);
+        }
+    }
+        printf("Network connection NOT attempted...\n");exit(1);
+
+    render_button(renderer, font, navigation_buttons.back);
+}
+
+void render_network_config_screen(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
+{
+    if (!ready_for_password)
+    {
+        if (!networks_ready)
+        {
+            render_loading_network_list_screen(renderer, font, navigation_buttons);
+        }
+        else if (select_network_index < 0)
+        {
+            render_select_network_screen(renderer, font, navigation_buttons);
+            
+        }
+        else if (select_network_index >= 0)
+        {
+            render_attempting_network_connection_screen(renderer, font, navigation_buttons);
+        }
+    }
+    else if (select_network_index >= 0 && ready_for_password)
+    {
+        printf("Wanting password now...\n");
+        char password[128] = "";
+        // enter_password(renderer, font, networks[selected_network].ssid, password, sizeof(password));
+        // connect_to_network(networks[selected_network].ssid, password);
+        selected_network = -1;
+        current_screen = SCREEN_MAIN;
+    }
+    else
+    {
+        _log("Default condition hit for network config screen."); // problably a bug? Maybe a race condition?
+        render_loading_network_list_screen(renderer, font, navigation_buttons);   
+    }
+}
+
+void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_status, Navigation_buttons navigation_buttons)
 {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -730,73 +688,11 @@ void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus * image_
     switch (current_screen)
     {
         case SCREEN_MAIN:
-            render_status_box(renderer, font, image_status);
-            render_buttons(renderer, font, buttons, 2);
+            render_main_screen(renderer, font, image_status, navigation_buttons);
             break;
 
         case SCREEN_NETWORK_CONFIG:
-
-            if (!ready_for_password)
-            {
-                if (!networks_ready)
-                {
-                    // loading network list
-                    render_loading_network_text(renderer, font);
-                    if (!networks_scanned)
-                    {
-                        networks_scanned = 1;
-                        pthread_t scan_networks;
-                        pthread_create(&scan_networks, NULL, scan_networks_thread, NULL);
-                        pthread_detach(scan_networks);
-                    }
-                }
-                else if (select_network_index < 0)
-                {
-                    // needs to select a network
-                    select_network_index = render_select_network(renderer, font, networks, net_count, back_button, retry_button);
-                    printf("Selected network is index: %i => %s\n\n", select_network_index, networks[select_network_index].ssid);
-
-                    for (int i = 0; i < net_count; i++)
-                    {
-                        SDL_Color color = {255, 255, 255, 255};
-                        SDL_Surface *s = TTF_RenderText_Solid(font, networks[i].ssid, color);
-                        SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
-                        SDL_Rect r = {50, 50 + i * 30, s->w, s->h};
-                        SDL_RenderCopy(renderer, t, NULL, &r);
-                        SDL_FreeSurface(s);
-                        SDL_DestroyTexture(t);
-                    }
-                }
-                else if (select_network_index >= 0)
-                {
-                    printf("Selected network is index: %i => %s\n\n", select_network_index, networks[select_network_index].ssid);
-                    // network has been selected. Attempt to connect without password
-                    if (!has_attempted_connection && connect_to_network(networks[select_network_index].ssid, NULL) != 0)
-                    {
-                        has_attempted_connection = 1;
-                        ready_for_password = 1;
-                        
-                        // render_password_prompt(renderer, font, networks[select_network_index].ssid, networks[select_network_index].password, MAX_PASSWORD);
-                        
-                        if (strlen(networks[select_network_index].password) > 0)
-                        {
-                            connect_to_network(networks[select_network_index].ssid, networks[select_network_index].password);
-                        }
-                    }
-                }
-            }
-
-            if (select_network_index >= 0 && ready_for_password)
-            {
-                printf("Wanting password now...\n");
-                char password[128] = "";
-                // enter_password(renderer, font, networks[selected_network].ssid, password, sizeof(password));
-                // connect_to_network(networks[selected_network].ssid, password);
-                selected_network = -1;
-                current_screen = SCREEN_MAIN;
-            }
-
-            render_button(renderer, font, &back_button);
+            render_network_config_screen(renderer, font, navigation_buttons);
             break;
     }
 
@@ -804,9 +700,53 @@ void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus * image_
     SDL_Delay(16);
 }
 
+void handle_events(SDL_Event e, Navigation_buttons navigation_buttons)
+{
+    while (SDL_PollEvent(&e)) 
+    {
+        // Detect if program has been closed by user
+        if (e.type == SDL_QUIT)
+        {
+            stop_requested = 1;
+        }
+
+        // determine if a button was clicked
+        if (e.type == SDL_MOUSEBUTTONDOWN)
+        {
+            int mx = e.button.x;
+            int my = e.button.y;
+
+            switch (current_screen)
+            {
+                case SCREEN_MAIN:
+                    if (navigation_button_is_pressed(navigation_buttons.select_network, mx, my))
+                    {
+                        current_screen = navigation_buttons.select_network.target_screen;
+                    }
+                    else if (navigation_button_is_pressed(navigation_buttons.clear_import, mx, my))
+                    {
+                        current_screen = navigation_buttons.clear_import.target_screen;
+                    }
+                    break;
+
+                case SCREEN_NETWORK_CONFIG:
+                    if (navigation_button_is_pressed(navigation_buttons.back, mx, my))
+                    {
+                        current_screen = navigation_buttons.back.target_screen;
+                    }
+                    else if (navigation_button_is_pressed(navigation_buttons.retry, mx, my))
+                    {
+                        current_screen = navigation_buttons.retry.target_screen;
+                    }
+                    break;
+            }
+        }
+    }
+}
+
 void run_UI(ImageStatus *image_status)
 {
-    int full_screen_enabled = 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+    int full_screen_enabled = 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0; // 0 for testing, 1 for production on Pi
 
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -825,15 +765,6 @@ void run_UI(ImageStatus *image_status)
     int screen_width, screen_height;
     SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
 
-    Button back_button;
-    setup_config_buttons(screen_width, screen_height, &back_button);
-
-    Button retry_button;
-    setup_retry_button(screen_width, screen_height, &retry_button);
-
-    Button buttons[2];
-    setup_buttons(screen_width, screen_height, buttons);
-
     int font_size = screen_height / 20;
     TTF_Font *font = TTF_OpenFont("Rubik/Rubik-VariableFont_wght.ttf", font_size);
     if (!font)
@@ -846,55 +777,17 @@ void run_UI(ImageStatus *image_status)
         return; 
     }
 
+    Navigation_buttons navigation_buttons = initialize_navigation_buttons(screen_width, screen_height);
     SDL_Event e;
 
     while (!stop_requested) 
     {
-        while (SDL_PollEvent(&e)) 
-        {
-            // prevent killing unresponsive window if not interacted with
-            if (e.type == SDL_QUIT)
-            {
-                stop_requested = 1;
-            }
-
-            // determine if a button was clicked
-            if (e.type == SDL_MOUSEBUTTONDOWN)
-            {
-                int mx = e.button.x;
-                int my = e.button.y;
-
-                for (int i = 0; i < 2; i++)
-                {
-                    if (button_is_pressed(buttons[i], mx, my))
-                    {
-                        if (i == 0)
-                        {
-                            if (current_screen == SCREEN_MAIN)
-                            {
-                                current_screen = SCREEN_NETWORK_CONFIG;
-                            }
-                            else
-                            {
-                                current_screen = SCREEN_MAIN;
-                            }
-                        }
-                        else
-                        {
-                            // config button not set up yet.
-                        }
-                    }
-                }
-            }
-        }
-
-        render_frame(renderer, font, image_status, buttons, back_button, retry_button);
+        // run the program continuously unless a program stop has been requested
+        handle_events(e, navigation_buttons);
+        render_frame(renderer, font, image_status, navigation_buttons);
     }
 
-    if (font)
-    {
-        TTF_CloseFont(font);
-    }
+    TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     TTF_Quit();

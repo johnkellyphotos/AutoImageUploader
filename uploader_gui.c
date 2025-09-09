@@ -28,18 +28,22 @@ int main()
 
     ImageStatus image_status = {0, 0, 0};
     signal(SIGINT, handle_sigint);
+
     load_config();
 
     _log("Initialization complete.");
 
+    // thread to constantly check for attached camera, import images, FTP images
     pthread_t worker;
     pthread_create(&worker, NULL, import_upload_worker, &image_status);
 
-    pthread_t link_strength;
-    pthread_create(&link_strength, NULL, link_poll_thread, NULL);
-
+    // thread to constantly check for internet connection. Internet is critical to program use. Program intended to be run in areas with limited internet
     pthread_t internet_is_up;
     pthread_create(&internet_is_up, NULL, internet_poll_thread, NULL);
+
+    // thread to constantly check for connection strength. Internet is critical to program use. Program intended to be run in areas with limited internet
+    pthread_t link_strength;
+    pthread_create(&link_strength, NULL, link_poll_thread, NULL);
 
     run_UI(&image_status);
 
