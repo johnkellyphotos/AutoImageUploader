@@ -9,9 +9,26 @@
 #include "ui.h"
 #include "uploader.h"
 
-int main() 
+int main(int argc, char *argv[]) 
 {
     _log("Program start.");
+
+    int full_screen_mode = 0;
+
+    for (int i = 1; i < argc; i++)
+    {
+        if (strcmp(argv[i], "--fullscreen") == 0)
+        {
+            _log("Full screen mode enabled.");
+            full_screen_mode = 1;
+            break;
+        }
+        else
+        {
+            _log("Invalid argument %s. Valid options are '--fullscreen' only.", argv[i]);
+            return 10;
+        }
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) 
     { 
@@ -45,7 +62,7 @@ int main()
     pthread_t link_strength;
     pthread_create(&link_strength, NULL, link_poll_thread, NULL);
 
-    run_UI(&image_status);
+    run_UI(&image_status, full_screen_mode);
 
     return 0;
 }

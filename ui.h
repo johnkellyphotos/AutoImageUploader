@@ -9,8 +9,15 @@
 #define MAX_PASSWORD 128
 #define MAX_CMD 512
 
-#define UI_PADDING_TOP 30
-#define UI_PADDING_LEFT 10
+typedef struct
+{
+    int font_size;
+    int ui_padding_left;
+    int ui_padding_top;
+    int ui_top_bar_height;
+} UI_parameters;
+
+UI_parameters ui_parameters;
 
 // use vilatilie ints because these will be accessed directly without optimization. (variable updated across threads)
 volatile int selected_network = -1;
@@ -28,7 +35,8 @@ volatile int camera_found = 0;
 pid_t conn_pid = 0;
 int conn_status = -1;
 
-typedef struct {
+typedef struct
+{
     volatile int x;
     volatile int y;
 } LastClick;
@@ -98,7 +106,7 @@ void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
 {
     char loading_statement[64] = "Loading networks";
     create_text_with_dynamic_elipsis(loading_statement, 64);
-    render_text(renderer, font, loading_statement, UI_PADDING_LEFT, UI_PADDING_TOP);
+    render_text(renderer, font, loading_statement, ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height);
 }
 
 int list_networks(int max)
@@ -343,16 +351,10 @@ void render_camera_status(SDL_Renderer *renderer, TTF_Font *font)
             break;
     }
 
-    int screen_width, screen_height;
-    SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
-
     SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    int start_x = UI_PADDING_LEFT;
-    int y_pos = UI_PADDING_LEFT;
-
-    SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
+    SDL_Rect dst = {ui_parameters.ui_padding_left, ui_parameters.ui_padding_top, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
 
     SDL_FreeSurface(surface);
@@ -375,13 +377,14 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
     int bar_size = (int)(surface->h * 0.66);
     int spacing = 10;
     int total_width = surface->w + spacing + bar_size;
-    int start_x = screen_width - total_width - 10;
-    int y_pos = 10;
+    int start_x = screen_width - total_width - ui_parameters.ui_padding_left;
 
-    SDL_Rect dst = {start_x, y_pos, surface->w, surface->h};
+    SDL_Rect dst = {start_x, ui_parameters.ui_padding_top, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
 
-    render_signal_indicator(renderer, start_x + surface->w + spacing, y_pos + (surface->h - bar_size) / 2, bar_size, bar_size, link_strength_value);
+    int text_center_y = ui_parameters.ui_padding_top + surface->h / 2;
+    int bar_y = text_center_y - bar_size / 2;
+    render_signal_indicator(renderer, start_x + surface->w + spacing, bar_y, bar_size, bar_size, link_strength_value);
 
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
@@ -389,22 +392,17 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
 
 void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *image_status)
 {
-    int w, h;
-    SDL_GetRendererOutputSize(renderer, &w, &h);
-
-    int margin = UI_PADDING_LEFT;
-
     char imported_text[64];
     snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");
     char uploaded_text[64];
     snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", image_status->uploaded, image_status->uploaded == 1 ? "" : "s");
 
-    int y_offset = UI_PADDING_TOP;
-    render_text(renderer, font, imported_text, margin, y_offset);
-    y_offset += h / 30 + 5;
+    int y_offset = ui_parameters.ui_top_bar_height;
+    render_text(renderer, font, imported_text, ui_parameters.ui_padding_left, y_offset);
+    y_offset += ui_parameters.font_size + (ui_parameters.font_size / 25);
 
-    render_text(renderer, font, uploaded_text, margin, y_offset);
-    y_offset += h / 30 + 10;
+    render_text(renderer, font, uploaded_text, ui_parameters.ui_padding_left, y_offset);
+    y_offset += ui_parameters.font_size + (ui_parameters.font_size / 25);
 
     const char *status_str;
     switch (image_status->status)
@@ -423,7 +421,7 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
             break;
     }
 
-    render_text(renderer, font, status_str, margin, y_offset);
+    render_text(renderer, font, status_str, ui_parameters.ui_padding_left, y_offset);
 }
 
 void render_header(SDL_Renderer *renderer, TTF_Font *font)
@@ -445,14 +443,14 @@ void render_network_connection_complete_screen(SDL_Renderer * renderer, TTF_Font
     if (network_connect_complete_status < 0)
     {
         strcpy(loading_statement, "Failed to connect to network.");
-        render_text(renderer, font, loading_statement, UI_PADDING_LEFT, UI_PADDING_TOP);
+        render_text(renderer, font, loading_statement, ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height);
         render_button(renderer, font, navigation_buttons.back);
         render_button(renderer, font, navigation_buttons.retry);
     }
     else
     {
         strcpy(loading_statement, "Network connection successful.");
-        render_text(renderer, font, loading_statement, UI_PADDING_LEFT, UI_PADDING_TOP);
+        render_text(renderer, font, loading_statement, ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height);
         render_button(renderer, font, navigation_buttons.back);
     }
 }
@@ -476,7 +474,7 @@ void render_no_network_found(SDL_Renderer * renderer, TTF_Font * font, Navigatio
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-    SDL_Rect title_rect = {UI_PADDING_LEFT, UI_PADDING_TOP, title_surf->w, title_surf->h};
+    SDL_Rect title_rect = {ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height, title_surf->w, title_surf->h};
 
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
     SDL_FreeSurface(title_surf);
@@ -497,19 +495,19 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
         return;
     }
 
-    int select_text_height = 30;
+    int select_text_height = ui_parameters.font_size + (ui_parameters.font_size / 20);
 
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-    SDL_Rect title_rect = {UI_PADDING_LEFT, UI_PADDING_TOP, title_surf->w, title_surf->h};
+    SDL_Rect title_rect = {ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height, title_surf->w, title_surf->h};
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
     SDL_FreeSurface(title_surf);
     SDL_DestroyTexture(title_tex);
 
     for (int i = 0; i < net_count; i++)
     {
-        SDL_Rect r = {UI_PADDING_LEFT, UI_PADDING_TOP + select_text_height + i * 30, 320, 24};
+        SDL_Rect r = {ui_parameters.ui_padding_left, (ui_parameters.font_size / 2) + (ui_parameters.ui_top_bar_height + select_text_height) + i * 2 * select_text_height, (ui_parameters.ui_padding_left * 48), ui_parameters.font_size * 1.5};
 
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_RenderFillRect(renderer, &r);
@@ -545,7 +543,7 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, loading_statement, white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
-    SDL_Rect title_rect = {UI_PADDING_LEFT, UI_PADDING_TOP, title_surf->w, title_surf->h};
+    SDL_Rect title_rect = {ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height, title_surf->w, title_surf->h};
 
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
     SDL_FreeSurface(title_surf);
@@ -693,14 +691,12 @@ void handle_events(SDL_Event e, Navigation_buttons navigation_buttons)
     }
 }
 
-void run_UI(ImageStatus *image_status)
+void run_UI(ImageStatus *image_status, int full_screen_mode)
 {
-    int full_screen_enabled = 0 ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0; // 0 for testing, 1 for production on Pi
-
     SDL_Window *window;
     SDL_Renderer *renderer;
     
-    if (full_screen_enabled)
+    if (full_screen_mode)
     {
         window = SDL_CreateWindow("Tritium Uploader", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 480, 320, SDL_WINDOW_FULLSCREEN_DESKTOP);
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -714,8 +710,12 @@ void run_UI(ImageStatus *image_status)
     int screen_width, screen_height;
     SDL_GetRendererOutputSize(renderer, &screen_width, &screen_height);
 
-    int font_size = screen_height / 20;
-    TTF_Font *font = TTF_OpenFont("Rubik/Rubik-VariableFont_wght.ttf", font_size);
+    ui_parameters.font_size = screen_height / 20;
+    ui_parameters.ui_padding_top = screen_width / 50; // font size + 2%
+    ui_parameters.ui_padding_left = screen_width / 50; // 2%
+    ui_parameters.ui_top_bar_height = ui_parameters.ui_padding_top + ui_parameters.font_size + (ui_parameters.font_size / 25);
+
+    TTF_Font *font = TTF_OpenFont("Rubik/Rubik-VariableFont_wght.ttf", ui_parameters.font_size);
     if (!font)
     {
         printf("Font load error: %s\n", TTF_GetError()); 
