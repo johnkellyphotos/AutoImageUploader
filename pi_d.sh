@@ -3,7 +3,7 @@
 # Update and install necessary libraries
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y libsdl2-dev libsdl2-ttf-dev libusb-1.0-0-dev libjson-c-dev libgphoto2-dev gphoto2
+sudo apt install -y libsdl2-dev libsdl2-ttf-dev libusb-1.0-0-dev libjson-c-dev libgphoto2-dev gphoto2 onboard
 sudo apt install 
 
 # Set Raspberry Pi to autologin to desktop
@@ -34,5 +34,14 @@ unclutter -display :0 -idle 0
 # autostart hide cursor
 mkdir -p ~/.config/lxsession/LXDE-pi/
 echo "@unclutter -display :0 -idle 0" >> ~/.config/lxsession/LXDE-pi/autostart
+
+# disable network notifications that popup over UI
+gsettings set org.gnome.nm-applet show-notifications false
+
+# init onboard to make onscreen keyboard possible
+dconf write /org/onboard/preferences/general/auto-show true
+# to launch: `onboard &`
+
+#prevent Raspberry Pi from auto mounting camera (interfers with gphoto2)
 
 sudo apt update && sudo apt upgrade -y
