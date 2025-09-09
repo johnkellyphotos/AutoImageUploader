@@ -601,6 +601,8 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
 
 void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Font *font, Navigation_buttons navigation_buttons)
 {
+    networks_scanned = 0; // reset networks have been scanned. If they hit back, or the scan completes, we want a new network list
+    
     char dots[5] = {0};
     for (int x = 0; x < number_dots_for_loading_screen && x < 4; x++)
     {
@@ -628,6 +630,7 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
 
     if (!has_attempted_connection)
     {
+        _log("Attempting to connect to network...");
         has_attempted_connection = 1;
         conn_pid = fork();
         if (conn_pid == 0)
@@ -648,10 +651,11 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
             {
                 conn_status = WEXITSTATUS(status);
             }
-            
+
             conn_pid = 0;
             networks_ready = 0;
             select_network_index = -1;
+            has_attempted_connection = 0;
             current_screen = SCREEN_MAIN; // leave page regardless of success
 
             if (conn_status != 0)
