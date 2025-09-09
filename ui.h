@@ -71,7 +71,7 @@ void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x
     SDL_DestroyTexture(texture);
 }
 
-void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
+void create_text_with_dynamic_elipsis(char *str, int max_string_length)
 {
     char dots[5] = {0};
     for (int x = 0; x < number_dots_for_loading_screen && x < 4; x++)
@@ -86,9 +86,16 @@ void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
         screen_refresh_count = 0;
     }
 
-    char loading_statement[64];
-    snprintf(loading_statement, sizeof(loading_statement), "Loading networks%s", dots);
+    char original[max_string_length];
+    strncpy(original, str, max_string_length - 1);
+    original[max_string_length - 1] = '\0'; // safety max null terminator
+    snprintf(str, max_string_length, "%s%s", original, dots);
+}
 
+void render_loading_network_text(SDL_Renderer *renderer, TTF_Font *font)
+{
+    char loading_statement[64] = "Loading networks";
+    create_text_with_dynamic_elipsis(loading_statement, 64);
     render_text(renderer, font, loading_statement, 10, 50);
 }
 
@@ -602,21 +609,9 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
 void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Font *font, Navigation_buttons navigation_buttons)
 {
     networks_scanned = 0; // reset networks have been scanned. If they hit back, or the scan completes, we want a new network list
-    
-    char dots[5] = {0};
-    for (int x = 0; x < number_dots_for_loading_screen && x < 4; x++)
-    {
-        dots[x] = '.';
-    }
 
-    if (screen_refresh_count++ > 30)
-    {
-        number_dots_for_loading_screen = (number_dots_for_loading_screen >= 4) ? 1 : number_dots_for_loading_screen + 1;
-        screen_refresh_count = 0;
-    }
-
-    char loading_statement[64];
-    snprintf(loading_statement, sizeof(loading_statement), "Attempting to connect to network%s", dots);
+    char loading_statement[64] = "Attempting to connect to network";
+    create_text_with_dynamic_elipsis(loading_statement, 64);
 
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *title_surf = TTF_RenderText_Solid(font, loading_statement, white);
