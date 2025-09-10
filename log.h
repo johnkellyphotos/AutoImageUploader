@@ -1,3 +1,5 @@
+#include <sys/stat.h>
+
 void _log(const char *fmt, ...) 
 {
     va_list args;
@@ -18,6 +20,15 @@ void _log(const char *fmt, ...)
     if (f)
     {
         fprintf(f, "[%s] %s\n", timestamp, msg);
+        fclose(f);
+    }
+}
+
+void clear_log_file()
+{
+    FILE *f = fopen("log.txt", "w");
+    if (f)
+    {
         fclose(f);
     }
 }

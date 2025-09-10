@@ -3,15 +3,8 @@
 #include <dirent.h>
 #include <string.h>
 #include <unistd.h>
-
-void clear_log_file()
-{
-    FILE *f = fopen("log.txt", "w");
-    if (f)
-    {
-        fclose(f);
-    }
-}
+#include <json-c/json.h>
+#include <sys/stat.h>
 
 void clear_track_file()
 {
@@ -20,6 +13,13 @@ void clear_track_file()
     {
         fclose(f);
     }
+}
+
+void handle_sigint(int sig)
+{
+    _log("Logging signal interrupt: %i", sig);
+    stop_requested = 1;
+    exit(1); // kill the progam.
 }
 
 void delete_images_in_import_folder()
@@ -49,4 +49,62 @@ void delete_images_in_import_folder()
     }
 
     closedir(dir);
+}
+
+char *get_import_directory() 
+{
+    static char import_dir[1060];
+    char cwd[1024];
+
+    getcwd(cwd, sizeof(cwd));
+    snprintf(import_dir, sizeof(import_dir), "%s/import", cwd);
+
+    struct stat st;
+    if (stat(import_dir, &st) != 0 || !S_ISDIR(st.st_mode)) 
+    {
+        mkdir(import_dir, 0755);
+    }
+
+    return import_dir;
+}
+
+void load_config() 
+{
+    const char *config_path = "./config.json";
+    FILE *fp = fopen(config_path, "r");
+    if (!fp) 
+    {
+        _log("Configuration file failed to load.");
+        perror("fopen");
+        exit(1);
+    }
+
+    _log("Configuration file loaded.");
+
+    fseek(fp, 0, SEEK_END);
+    long fsize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    char *data = malloc(fsize + 1);
+    fread(data, 1, fsize, fp);
+    data[fsize] = 0;
+    fclose(fp);
+
+    struct json_object *parsed_json = json_tokener_parse(data);
+    free(data);
+
+    struct json_object *j_ftp_url, *j_ftp_userpwd;
+
+    json_object_object_get_ex(parsed_json, "FTP_URL", &j_ftp_url);
+    json_object_object_get_ex(parsed_json, "FTP_USERPWD", &j_ftp_userpwd);
+
+    LOCAL_DIR = get_import_directory();
+
+    char *track_buf = malloc(strlen(LOCAL_DIR) + strlen(".uploaded") + 1);
+    sprintf(track_buf, "%s.uploaded", LOCAL_DIR);
+
+    FTP_URL = strdup(json_object_get_string(j_ftp_url));
+    FTP_USERPWD = strdup(json_object_get_string(j_ftp_userpwd));
+
+    json_object_put(parsed_json);
 }

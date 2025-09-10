@@ -4,15 +4,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <signal.h>
 
 const char *LOCAL_DIR;
 const char *TRACK_FILE = ".track.txt";
 const char *FTP_URL;
 const char *FTP_USERPWD;
 
+volatile sig_atomic_t stop_requested = 0;
+
 #include "ui_colors.h"
 #include "log.h"
 #include "support.h"
+#include "ftp.h"
 #include "ui.h"
 #include "uploader.h"
 

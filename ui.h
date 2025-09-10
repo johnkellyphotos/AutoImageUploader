@@ -1,6 +1,5 @@
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <signal.h>
 #include <libusb-1.0/libusb.h>
 #include <unistd.h>
 #include "buttons.h"
@@ -57,8 +56,6 @@ typedef struct
     int uploaded;
     int status; // 0 = waiting, 1 = importing, 2 = uploading, 3 = No internet, import only
 } ImageStatus;
-
-volatile sig_atomic_t stop_requested = 0;
 
 Screen current_screen = SCREEN_MAIN;
 
