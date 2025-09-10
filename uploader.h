@@ -551,7 +551,6 @@ void *import_upload_worker(void *arg)
                 snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
                 if (upload_file(path, dir->d_name)) 
                 {
-                    _log("case 5");
                     mark_uploaded(dir->d_name);
                 }
             }

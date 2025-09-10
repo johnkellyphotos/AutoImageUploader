@@ -417,7 +417,7 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
             color = ui_colors.yellow;
             break;
         case 2:
-            strcpy(status_str, "↑ Uploading images");
+            strcpy(status_str, "Uploading images");
             color = ui_colors.green;
             break;
         case 3:
