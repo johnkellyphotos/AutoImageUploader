@@ -73,8 +73,7 @@ int navigation_button_is_pressed(Button button, int mx, int my)
 
 void render_wrappable_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, int wrap_width)
 {
-    SDL_Color color = {255, 255, 255, 255};
-    SDL_Surface *surf = TTF_RenderText_Blended_Wrapped(font, text, color, wrap_width);
+    SDL_Surface *surf = TTF_RenderText_Blended_Wrapped(font, text, ui_colors.white, wrap_width);
     SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
     SDL_Rect dst = {x, y, surf->w, surf->h};
     SDL_RenderCopy(renderer, tex, NULL, &dst);
@@ -82,10 +81,19 @@ void render_wrappable_text(SDL_Renderer *renderer, TTF_Font *font, const char *t
     SDL_DestroyTexture(tex);
 }
 
+void render_colored_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color) 
+{
+    SDL_Surface *surface = TTF_RenderUTF8_Solid(font, text, color);
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Rect dst = {x, y, surface->w, surface->h};
+    SDL_RenderCopy(renderer, texture, NULL, &dst);
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
 void render_text(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) 
 {
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *surface = TTF_RenderText_Solid(font, text, white);
+    SDL_Surface *surface = TTF_RenderUTF8_Solid(font, text, ui_colors.white);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_Rect dst = {x, y, surface->w, surface->h};
     SDL_RenderCopy(renderer, texture, NULL, &dst);
@@ -228,8 +236,7 @@ void render_button(SDL_Renderer *renderer, TTF_Font *font, Button btn)
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderDrawRect(renderer, &rect);
 
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *surface = TTF_RenderText_Solid(font, btn.label, white);
+    SDL_Surface *surface = TTF_RenderText_Solid(font, btn.label, ui_colors.white);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
 
     int tx = btn.x + (btn.w - surface->w) / 2;
@@ -336,48 +343,30 @@ void* internet_poll_thread()
 void render_camera_status(SDL_Renderer *renderer, TTF_Font *font)
 {
     SDL_Color font_color;
-    switch (camera_found)
-    {
-        case -1:
-            font_color = (SDL_Color){255, 255, 0, 255};
-            break;
-        case 1:
-            font_color = (SDL_Color){55, 255, 55, 255};
-            break;
-        default:
-            font_color = (SDL_Color){255, 0, 0, 255};
-            break;
-    }
-
     const char *status_text;
+
     switch (camera_found)
     {
         case -1:
             status_text = "Camera detected - no communication";
+            font_color = ui_colors.yellow;
             break;
         case 1:
             status_text = "Camera detected";
+            font_color = ui_colors.green;
             break;
         default:
             status_text = "No camera detected";
+            font_color = ui_colors.red;
             break;
     }
 
-    SDL_Surface *surface = TTF_RenderText_Solid(font, status_text, font_color);
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-
-    SDL_Rect dst = {ui_parameters.ui_padding_left, ui_parameters.ui_padding_top, surface->w, surface->h};
-    SDL_RenderCopy(renderer, texture, NULL, &dst);
-
-    SDL_FreeSurface(surface);
-    SDL_DestroyTexture(texture);
+    render_colored_text(renderer, font, status_text, ui_parameters.ui_padding_left, ui_parameters.ui_padding_top, font_color);
 }
 
 void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
 {
-    SDL_Color font_color = internet_up
-        ? (SDL_Color){55, 255, 55, 255} 
-        : (SDL_Color){255, 0, 0, 255};
+    SDL_Color font_color = internet_up ? ui_colors.green : ui_colors.red;
     const char *status_text = internet_up ? "Internet connected" : "No internet";
 
     int screen_width, screen_height;
@@ -391,8 +380,7 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
     int total_width = surface->w + spacing + bar_size;
     int start_x = screen_width - total_width - ui_parameters.ui_padding_left;
 
-    SDL_Rect dst = {start_x, ui_parameters.ui_padding_top, surface->w, surface->h};
-    SDL_RenderCopy(renderer, texture, NULL, &dst);
+    render_colored_text(renderer, font, status_text, start_x, ui_parameters.ui_padding_top, font_color);
 
     int text_center_y = ui_parameters.ui_padding_top + surface->h / 2;
     int bar_y = text_center_y - bar_size / 2;
@@ -416,24 +404,30 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     render_text(renderer, font, uploaded_text, ui_parameters.ui_padding_left, y_offset);
     y_offset += ui_parameters.font_size + (ui_parameters.font_size / 25);
 
-    const char *status_str;
+    SDL_Color color;
+    char status_str[64];
     switch (image_status->status)
     {
         case 0:
-            status_str = "Waiting for images";
+            strcpy(status_str, "Waiting for images");
+            color = ui_colors.white;
             break;
         case 1:
-            status_str = "Importing images";
+            strcpy(status_str, "Importing images");
+            color = ui_colors.yellow;
             break;
         case 2:
-            status_str = "Uploading images";
+            strcpy(status_str, "↑ Uploading images");
+            color = ui_colors.green;
             break;
         case 3:
-            status_str = "Importing images only - no internet";
+            strcpy(status_str, "Importing images only - no internet");
+            color = ui_colors.red;
             break;
     }
-
-    render_text(renderer, font, status_str, ui_parameters.ui_padding_left, y_offset);
+    
+    create_text_with_dynamic_elipsis(status_str, 64);
+    render_colored_text(renderer, font, status_str, ui_parameters.ui_padding_left, y_offset, color);
 }
 
 void render_header(SDL_Renderer *renderer, TTF_Font *font)
@@ -483,8 +477,7 @@ void render_loading_network_list_screen(SDL_Renderer * renderer, TTF_Font * font
 
 void render_no_network_found(SDL_Renderer * renderer, TTF_Font * font, Navigation_buttons navigation_buttons)
 {
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", white);
+    SDL_Surface *title_surf = TTF_RenderText_Solid(font, "No networks found. Retry?", ui_colors.white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
     SDL_Rect title_rect = {ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height, title_surf->w, title_surf->h};
 
@@ -509,8 +502,7 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
 
     int select_text_height = ui_parameters.font_size + (ui_parameters.font_size / 20);
 
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", white);
+    SDL_Surface *title_surf = TTF_RenderText_Solid(font, "Select Wi-Fi network:", ui_colors.white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
     SDL_Rect title_rect = {ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height, title_surf->w, title_surf->h};
     SDL_RenderCopy(renderer, title_tex, NULL, &title_rect);
@@ -528,7 +520,7 @@ void render_select_network_screen(SDL_Renderer * renderer, TTF_Font * font, Navi
 
         char network_name[32];
         clip_string(network_name, networks[i].ssid, 32);
-        SDL_Surface *s = TTF_RenderText_Solid(font, network_name, white);
+        SDL_Surface *s = TTF_RenderText_Solid(font, network_name, ui_colors.white);
         SDL_Texture *t = SDL_CreateTextureFromSurface(renderer, s);
         SDL_Rect dst = {r.x + 10, r.y + (r.h - s->h)/2, s->w, s->h};
         SDL_RenderCopy(renderer, t, NULL, &dst);
@@ -552,8 +544,7 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
     char loading_statement[64] = "Attempting to connect to network";
     create_text_with_dynamic_elipsis(loading_statement, 64);
 
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *title_surf = TTF_RenderText_Solid(font, loading_statement, white);
+    SDL_Surface *title_surf = TTF_RenderText_Solid(font, loading_statement, ui_colors.white);
     SDL_Texture *title_tex = SDL_CreateTextureFromSurface(renderer, title_surf);
     SDL_Rect title_rect = {ui_parameters.ui_padding_left, ui_parameters.ui_top_bar_height, title_surf->w, title_surf->h};
 

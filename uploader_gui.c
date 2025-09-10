@@ -10,6 +10,7 @@ const char *TRACK_FILE = ".track.txt";
 const char *FTP_URL;
 const char *FTP_USERPWD;
 
+#include "ui_colors.h"
 #include "log.h"
 #include "support.h"
 #include "ui.h"

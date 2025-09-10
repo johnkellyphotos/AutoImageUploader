@@ -521,6 +521,7 @@ void *import_upload_worker(void *arg)
         if (internet_up && d) 
         {
             _log("FTP beginning...");
+            image_status->status = 2; // uploading
             struct dirent *dir;
             int counter = 0;
             while ((dir = readdir(d)) != NULL) 
@@ -546,14 +547,13 @@ void *import_upload_worker(void *arg)
 
                 char path[1024];
                 snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
-                image_status->status = 2; // uploading
                 if (upload_file(path, dir->d_name)) 
                 {
                     _log("case 5");
                     mark_uploaded(dir->d_name);
-                    image_status->status = 0;
                 }
             }
+            image_status->status = 0;
             closedir(d);
         } 
         else if (!internet_up && (camera_found > 0)) 
