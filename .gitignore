@@ -1,2 +1,11 @@
 .idea/*
 config.json
+uploader
+import/*
+uploader_gui
+
+log.txt
+
+.vscode/settings.json
+
+.track.txt
