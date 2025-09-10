@@ -52,6 +52,7 @@ void handle_sigint(int sig)
     _log("Logging signal interrupt: %i", sig);
     stop_requested = 1;
     kill_camera_users();
+    exit(1); // kill the progam.
 }
 
 void list_files_recursive(const char *folder)
