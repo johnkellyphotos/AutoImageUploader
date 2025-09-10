@@ -167,6 +167,7 @@ void camera_init_global()
         }
         else if (ret == -53)
         {
+            kill_camera_users();
             camera_found = -1;
         }
         else
