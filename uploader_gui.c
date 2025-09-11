@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    Program_status program_status = {0, 0, 0};
+    Program_status program_status = {0, 0, 0, {0}, {0}};
     signal(SIGINT, handle_sigint);
 
     load_config();

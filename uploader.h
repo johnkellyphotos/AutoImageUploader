@@ -33,6 +33,73 @@ void kill_device_mount_to_camera()
     system("pkill -f gvfs-gphoto2-volume-monitor");
 }
 
+void acquire_camera_name(Program_status *program_status)
+{
+    if (!program_status)
+    {
+        return;
+    }
+
+    CameraText text;
+    if (gp_camera_get_summary(global_camera, &text, global_context) == GP_OK)
+    {
+        // Reserve 128 bytes total: leave ~16 for formatting
+        char manufacturer[48] = {0};
+        char model[48] = {0};
+        char serial[32] = {0};
+
+        char *line = strtok(text.text, "\n");
+        while (line)
+        {
+            if (strncmp(line, "Manufacturer:", 13) == 0)
+            {
+                sscanf(line + 13, "%47[^\n]", manufacturer);
+            }
+            else if (strncmp(line, "Model:", 6) == 0)
+            {
+                sscanf(line + 6, "%47[^\n]", model);
+            }
+            else if (strncmp(line, "Serial Number:", 14) == 0)
+            {
+                sscanf(line + 14, "%31[^\n]", serial);
+            }
+            line = strtok(NULL, "\n");
+        }
+
+        // Ensure total length <= 127
+        manufacturer[47] = '\0';
+        model[47] = '\0';
+        serial[31] = '\0';
+
+        snprintf(program_status->camera_name, sizeof(program_status->camera_name), "%.47s %.47s", manufacturer, model);
+        program_status->camera_name[sizeof(program_status->camera_name) - 1] = '\0';
+
+        strncpy(program_status->camera_serial_number, serial, sizeof(program_status->camera_serial_number) - 1);
+        program_status->camera_serial_number[sizeof(program_status->camera_serial_number) - 1] = '\0';
+
+        _log(LOG_GENERAL, "Acquired camera name: %s, S/N: %s.", program_status->camera_name, program_status->camera_serial_number);
+    }
+    else
+    {
+        CameraAbilities abilities;
+        if (gp_camera_get_abilities(global_camera, &abilities) == GP_OK)
+        {
+            strncpy(program_status->camera_name, abilities.model, sizeof(program_status->camera_name) - 1);
+            program_status->camera_name[sizeof(program_status->camera_name) - 1] = '\0';
+
+            program_status->camera_serial_number[0] = '\0';
+
+            _log(LOG_GENERAL, "Acquired camera name: %s, S/N: %s.", program_status->camera_name, program_status->camera_serial_number);
+        }
+        else
+        {
+            program_status->camera_name[0] = '\0';
+            program_status->camera_serial_number[0] = '\0';
+            _log(LOG_ERROR, "Could not acquire camera name.");
+        }
+    }
+}
+
 static void camera_cleanup()
 {
     if (global_camera)
@@ -170,11 +237,13 @@ void list_files_recursive(const char *folder, Program_status *program_status)
         camera_initialized = 0;
         camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
         program_status->status = CAMERA_STATUS_NO_CAMERA;
+        program_status->camera_name[0] = '\0';
+        program_status->camera_serial_number[0] = '\0';
     }
     gp_list_free(files);
 }
 
-static int try_init_camera_once()
+static int try_init_camera_once(Program_status *program_status)
 {
     _log(LOG_GENERAL, "Attempting to initialize camera...");
     int ret;
@@ -211,13 +280,15 @@ static int try_init_camera_once()
         return ret;
     }
 
+    acquire_camera_name(program_status);
+
     _log(LOG_GENERAL, "Camera successfully initialized.");
     camera_initialized = 1;
     camera_found = 1;
     return GP_OK;
 }
 
-void camera_init_global(void)
+void camera_init_global(Program_status *program_status)
 {
     const int MAX_RETRIES = 2;
     int attempt = 0;
@@ -226,7 +297,7 @@ void camera_init_global(void)
 
     for (attempt = 0; attempt < MAX_RETRIES && !stop_requested; ++attempt)
     {
-        int ret = try_init_camera_once();
+        int ret = try_init_camera_once(program_status);
         if (ret >= GP_OK)
         {
             _log(LOG_GENERAL, "Initialization attempt completed successfully.");
@@ -264,7 +335,7 @@ void download_existing_files_from_camera(Program_status *program_status)
 
     if (!camera_initialized)
     {
-        camera_init_global();
+        camera_init_global(program_status);
         if (!camera_initialized)
         {
             _log(LOG_ERROR, "Camera failed intialized in download_existing_files_from_camera()... aborting...");
@@ -316,6 +387,8 @@ void *import_upload_worker(void *arg)
                     camera_initialized = 1;
                     camera_found = 1;
                     _log(LOG_GENERAL, "Camera initialized in worker loop.");
+
+                    acquire_camera_name(program_status);
                 }
                 else
                 {
@@ -379,6 +452,8 @@ void *import_upload_worker(void *arg)
                     camera_cleanup();
                     camera_initialized = 0;
                     program_status->status = CAMERA_STATUS_NO_CAMERA;
+                    program_status->camera_name[0] = '\0';
+                    program_status->camera_serial_number[0] = '\0';
                     camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
                 }
 

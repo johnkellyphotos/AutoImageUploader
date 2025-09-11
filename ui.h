@@ -64,6 +64,8 @@ typedef struct
     int imported;
     int uploaded;
     Camera_status status;
+    char camera_name[256];
+    char camera_serial_number[32];
 } Program_status;
 
 Screen current_screen = SCREEN_MAIN;
@@ -398,12 +400,21 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
 
 void render_status_box(SDL_Renderer *renderer, TTF_Font *font, Program_status *program_status)
 {
+    char camera_name[512] = {0};
+    int y_offset = ui_parameters.ui_top_bar_height;
+    
+    if (program_status->status != CAMERA_STATUS_NO_CAMERA)
+    {
+        snprintf(camera_name, sizeof(camera_name), "Connected to %s", program_status->camera_name);
+        render_text(renderer, font, camera_name, ui_parameters.ui_padding_left, y_offset);
+        y_offset += ui_parameters.font_size + (ui_parameters.font_size / 25);
+    }
+
     char imported_text[64];
     snprintf(imported_text, sizeof(imported_text), "%i image%s imported", program_status->imported, program_status->imported == 1 ? "" : "s");
     char uploaded_text[64];
     snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", program_status->uploaded, program_status->uploaded == 1 ? "" : "s");
 
-    int y_offset = ui_parameters.ui_top_bar_height;
     render_text(renderer, font, imported_text, ui_parameters.ui_padding_left, y_offset);
     y_offset += ui_parameters.font_size + (ui_parameters.font_size / 25);
 
@@ -412,6 +423,7 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, Program_status *p
 
     SDL_Color color;
     char status_str[64];
+
     switch (program_status->status)
     {
         case CAMERA_STATUS_NO_CAMERA:
