@@ -57,16 +57,14 @@ typedef enum
     CAMERA_STATUS_IMPORTING,
     CAMERA_STATUS_UPLOADING,
     CAMERA_STATUS_IMPORT_ONLY
-} IMAGE_STATUS;
+} Camera_status;
 
 typedef struct
 {
     int imported;
     int uploaded;
-    IMAGE_STATUS status; // 0 = waiting, 1 = importing, 2 = uploading, 3 = No internet, import only
-} ImageStatus;
-
-
+    Camera_status status;
+} Program_status;
 
 Screen current_screen = SCREEN_MAIN;
 
@@ -398,12 +396,12 @@ void render_connection_status(SDL_Renderer *renderer, TTF_Font *font)
     SDL_DestroyTexture(texture);
 }
 
-void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *image_status)
+void render_status_box(SDL_Renderer *renderer, TTF_Font *font, Program_status *program_status)
 {
     char imported_text[64];
-    snprintf(imported_text, sizeof(imported_text), "%i image%s imported", image_status->imported, image_status->imported == 1 ? "" : "s");
+    snprintf(imported_text, sizeof(imported_text), "%i image%s imported", program_status->imported, program_status->imported == 1 ? "" : "s");
     char uploaded_text[64];
-    snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", image_status->uploaded, image_status->uploaded == 1 ? "" : "s");
+    snprintf(uploaded_text, sizeof(uploaded_text), "%i image%s sent to server", program_status->uploaded, program_status->uploaded == 1 ? "" : "s");
 
     int y_offset = ui_parameters.ui_top_bar_height;
     render_text(renderer, font, imported_text, ui_parameters.ui_padding_left, y_offset);
@@ -414,7 +412,7 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
 
     SDL_Color color;
     char status_str[64];
-    switch (image_status->status)
+    switch (program_status->status)
     {
         case CAMERA_STATUS_NO_CAMERA:
             strcpy(status_str, "Please attach or power on a camera");
@@ -448,9 +446,9 @@ void render_header(SDL_Renderer *renderer, TTF_Font *font)
     render_connection_status(renderer, font);   
 }
 
-void render_main_screen(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_status, Navigation_buttons navigation_buttons)
+void render_main_screen(SDL_Renderer * renderer, TTF_Font * font, Program_status *program_status, Navigation_buttons navigation_buttons)
 {
-    render_status_box(renderer, font, image_status);
+    render_status_box(renderer, font, program_status);
     render_button(renderer, font, navigation_buttons.select_network);
     render_button(renderer, font, navigation_buttons.clear_import);
 }
@@ -688,7 +686,7 @@ void render_clear_imports_complete_screen(SDL_Renderer * renderer, TTF_Font * fo
     render_button(renderer, font, navigation_buttons.back);
 }
 
-void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_status, Navigation_buttons navigation_buttons)
+void render_frame(SDL_Renderer * renderer, TTF_Font * font, Program_status *program_status, Navigation_buttons navigation_buttons)
 {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -698,7 +696,7 @@ void render_frame(SDL_Renderer * renderer, TTF_Font * font, ImageStatus *image_s
     switch (current_screen)
     {
         case SCREEN_MAIN:
-            render_main_screen(renderer, font, image_status, navigation_buttons);
+            render_main_screen(renderer, font, program_status, navigation_buttons);
             break;
 
         case SCREEN_NETWORK_CONFIG:
@@ -788,7 +786,7 @@ void handle_events(SDL_Event e, Navigation_buttons navigation_buttons)
     }
 }
 
-void run_UI(ImageStatus *image_status, int full_screen_mode)
+void run_UI(Program_status *program_status, int full_screen_mode)
 {
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -830,7 +828,7 @@ void run_UI(ImageStatus *image_status, int full_screen_mode)
     {
         // run the program continuously unless a program stop has been requested
         handle_events(e, navigation_buttons);
-        render_frame(renderer, font, image_status, navigation_buttons);
+        render_frame(renderer, font, program_status, navigation_buttons);
     }
 
     TTF_CloseFont(font);

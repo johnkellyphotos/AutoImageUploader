@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    ImageStatus image_status = {0, 0, 0};
+    Program_status program_status = {0, 0, 0};
     signal(SIGINT, handle_sigint);
 
     load_config();
@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
 
     // thread to constantly check for attached camera, import images, FTP images
     pthread_t worker;
-    pthread_create(&worker, NULL, import_upload_worker, &image_status);
+    pthread_create(&worker, NULL, import_upload_worker, &program_status);
 
     // thread to constantly check for internet connection. Internet is critical to program use. Program intended to be run in areas with limited internet
     pthread_t internet_is_up;
@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
     pthread_t link_strength;
     pthread_create(&link_strength, NULL, link_poll_thread, NULL);
 
-    run_UI(&image_status, full_screen_mode);
+    run_UI(&program_status, full_screen_mode);
 
     return 0;
 }

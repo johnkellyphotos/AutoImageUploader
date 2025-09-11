@@ -91,7 +91,7 @@ int fetch_file(const char *folder, const char *filename)
     return ret;
 }
 
-void list_files_recursive(const char *folder)
+void list_files_recursive(const char *folder, Program_status *program_status)
 {
     if (!downloaded_files)
     {
@@ -120,7 +120,7 @@ void list_files_recursive(const char *folder)
                 {
                     snprintf(path, sizeof(path), "%s/%s", folder, sub);
                 }
-                list_files_recursive(path);
+                list_files_recursive(path, program_status);
             }
         }
     }
@@ -142,6 +142,7 @@ void list_files_recursive(const char *folder)
         int file_count = gp_list_count(files);
         if (file_count > 0)
         {
+            program_status->status = internet_up ? CAMERA_STATUS_IMPORTING : CAMERA_STATUS_IMPORT_ONLY;
             _log(LOG_GENERAL, "Importing images for folder %s", folder);
         }
         for (int j = 0; j < file_count; j++)
@@ -161,12 +162,14 @@ void list_files_recursive(const char *folder)
                 }
             }
         }
+        program_status->status = CAMERA_STATUS_WAITING;
     }
     else
     {
         camera_cleanup();
         camera_initialized = 0;
         camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
+        program_status->status = CAMERA_STATUS_NO_CAMERA;
     }
     gp_list_free(files);
 }
@@ -254,7 +257,7 @@ void camera_init_global(void)
     _log(LOG_GENERAL, "Camera could not be initialized.");
 }
 
-void download_existing_files_from_camera(ImageStatus *image_status)
+void download_existing_files_from_camera(Program_status *program_status)
 {
     _log(LOG_GENERAL, "Attempting to download existing files to device from camera.");
     pthread_mutex_lock(&camera_mutex);
@@ -284,9 +287,8 @@ void download_existing_files_from_camera(ImageStatus *image_status)
         return;
     }
 
-    image_status->status = internet_up ? CAMERA_STATUS_IMPORTING : CAMERA_STATUS_IMPORT_ONLY;
     _log(LOG_GENERAL, "Importing images for from camera...");
-    list_files_recursive("/");
+    list_files_recursive("/", program_status);
 
     gp_list_free(folders);
     camera_busy_flag = 0;
@@ -295,7 +297,7 @@ void download_existing_files_from_camera(ImageStatus *image_status)
 
 void *import_upload_worker(void *arg) 
 {
-    ImageStatus *image_status = (ImageStatus *)arg;
+    Program_status *program_status = (Program_status *)arg;
 
     _log(LOG_GENERAL, "Starting upload worker.");
 
@@ -340,13 +342,13 @@ void *import_upload_worker(void *arg)
         // Step 2: Only fetch files if camera is initialized and available
         if (camera_initialized && camera_found > 0)
         {
-            download_existing_files_from_camera(image_status);
+            download_existing_files_from_camera(program_status);
             _log(LOG_GENERAL, "Existing file download complete.");
         }
 
         // Update status
-        image_status->imported = count_imported_images();
-        image_status->uploaded = count_uploaded_images();
+        program_status->imported = count_imported_images();
+        program_status->uploaded = count_uploaded_images();
 
         // Step 3: Periodically handle camera events (no reinit)
         static time_t last_camera_check = 0;
@@ -376,7 +378,7 @@ void *import_upload_worker(void *arg)
                     _log(LOG_GENERAL, "Camera event wait failed: %d", ret);
                     camera_cleanup();
                     camera_initialized = 0;
-                    image_status->status = CAMERA_STATUS_NO_CAMERA;
+                    program_status->status = CAMERA_STATUS_NO_CAMERA;
                     camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
                 }
 
@@ -408,7 +410,7 @@ void *import_upload_worker(void *arg)
                 }
 
                 char path[1024];
-                image_status->status = CAMERA_STATUS_UPLOADING;
+                program_status->status = CAMERA_STATUS_UPLOADING;
                 snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
 
                 if (upload_file(path, dir->d_name))
@@ -420,7 +422,7 @@ void *import_upload_worker(void *arg)
         } 
         else if (!internet_up && camera_found > 0) 
         {
-            image_status->status = CAMERA_STATUS_IMPORT_ONLY;
+            program_status->status = CAMERA_STATUS_IMPORT_ONLY;
         }
 
         usleep(100000);
