@@ -21,6 +21,14 @@ GPContext *global_context = NULL;
 volatile int camera_initialized = 0;
 volatile int camera_busy_flag = 0;
 
+void kill_device_mount_to_camera()
+{
+    // sometimes the computer will mount the device BEFORE this program can mount it.
+    // Since this program will retry and the computer OS will not, kill process mounting it
+    system("pkill -f gvfsd-gphoto2");
+    system("pkill -f gvfs-gphoto2-volume-monitor");
+}
+
 static void camera_cleanup()
 {
     if (global_camera)
@@ -218,15 +226,16 @@ void camera_init_global(void)
             return;
         }
 
-        if (ret == GP_ERROR_MODEL_NOT_FOUND || ret == -105)
+        if (ret == GP_ERROR_MODEL_NOT_FOUND)
         {
             camera_found = 0;
             _log(LOG_GENERAL, "Camera not present (attempt %d).", attempt + 1);
         }
         else if (ret == GP_ERROR_CAMERA_BUSY || ret == -53)
         {
+            kill_device_mount_to_camera();
             camera_found = -1;
-            _log(LOG_ERROR, "Device busy (attempt %d).", attempt + 1);
+            _log(LOG_ERROR, "Device busy (attempt %d). Attempting to kill existing mounts and", attempt + 1);
         }
         else
         {
@@ -300,7 +309,7 @@ void *import_upload_worker(void *arg)
                 {
                     camera_initialized = 1;
                     camera_found = 1;
-                    _log(LOG_GENERAL, "Camera reinitialized in worker loop.");
+                    _log(LOG_GENERAL, "Camera initialized in worker loop.");
                 }
                 else
                 {
@@ -308,6 +317,10 @@ void *import_upload_worker(void *arg)
                     global_camera = NULL;
                     camera_initialized = 0;
                     camera_found = ret == -53 ? -1 : 0;
+                    if (ret == -53 )
+                    {
+                        kill_device_mount_to_camera();
+                    }
                     _log(LOG_GENERAL, ret == -53 ? "Camera busy... could not connect." :  "No camera detected.");
                 }
             }
