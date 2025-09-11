@@ -1,7 +1,26 @@
 #include <sys/stat.h>
 
-void _log(const char *fmt, ...) 
+typedef enum
 {
+    LOG_GENERAL,
+    LOG_ERROR
+} LOG_TYPE;
+
+typedef enum
+{
+    LOGGIN_ALL,
+    LOGGIN_ERROR_ONLY,
+} LOGGING_TYPE;
+
+LOGGING_TYPE logging_status;
+
+void _log(LOG_TYPE log_type, const char *fmt, ...) 
+{
+    if (logging_status != LOGGIN_ALL && log_type != LOG_ERROR)
+    {
+        return;
+    }
+
     va_list args;
     va_start(args, fmt);
 

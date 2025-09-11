@@ -17,7 +17,7 @@ void clear_track_file()
 
 void handle_sigint(int sig)
 {
-    _log("Logging signal interrupt: %i", sig);
+    _log(LOG_GENERAL, "Logging signal interrupt: %i", sig);
     stop_requested = 1;
     exit(1); // kill the progam.
 }
@@ -74,12 +74,12 @@ void load_config()
     FILE *fp = fopen(config_path, "r");
     if (!fp) 
     {
-        _log("Configuration file failed to load.");
+        _log(LOG_ERROR, "Configuration file failed to load.");
         perror("fopen");
         exit(1);
     }
 
-    _log("Configuration file loaded.");
+    _log(LOG_GENERAL, "Configuration file loaded.");
 
     fseek(fp, 0, SEEK_END);
     long fsize = ftell(fp);

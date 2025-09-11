@@ -10,8 +10,10 @@
 #include <gphoto2/gphoto2-camera.h>
 #include <gphoto2/gphoto2-context.h>
 #include <sys/stat.h>
+#include <glib.h>
 
 pthread_mutex_t camera_mutex = PTHREAD_MUTEX_INITIALIZER;
+GHashTable *downloaded_files = NULL;
 
 Camera *global_camera = NULL;
 GPContext *global_context = NULL;
@@ -19,39 +21,74 @@ GPContext *global_context = NULL;
 volatile int camera_initialized = 0;
 volatile int camera_busy_flag = 0;
 
-void kill_camera_users() 
+static void camera_cleanup()
 {
-    libusb_context *ctx;
-    libusb_device **list;
-    ssize_t cnt;
-    libusb_init(&ctx);
-    cnt = libusb_get_device_list(ctx, &list);
-
-    for (ssize_t i = 0; i < cnt; i++)
+    if (global_camera)
     {
-        struct libusb_device_descriptor desc;
-        libusb_get_device_descriptor(list[i], &desc);
-        if (desc.idVendor == 0x04b0 && desc.idProduct == 0x043a)
-        {
-            uint8_t bus = libusb_get_bus_number(list[i]);
-            uint8_t addr = libusb_get_device_address(list[i]);
-            char cmd[256];
-            snprintf(cmd, sizeof(cmd), "fuser -k /dev/bus/usb/%03d/%03d", bus, addr);
-            system(cmd);
-        }
+        gp_camera_exit(global_camera, global_context);
+        gp_camera_free(global_camera);
+        global_camera = NULL;
+    }
+    if (global_context)
+    {
+        gp_context_unref(global_context);
+        global_context = NULL;
+    }
+    camera_initialized = camera_found = 0;
+}
+
+int fetch_file(const char *folder, const char *filename)
+{
+    CameraFile *file;
+    gp_file_new(&file);
+
+    int ret = gp_camera_file_get(global_camera, folder, filename, GP_FILE_TYPE_NORMAL, file, global_context);
+
+    if (ret < GP_OK)
+    {
+        ret = gp_camera_file_get(global_camera, folder, filename, GP_FILE_TYPE_PREVIEW, file, global_context);
     }
 
-    libusb_free_device_list(list, 1);
-    libusb_exit(ctx);
+    if (ret < GP_OK)
+    {
+        ret = gp_camera_file_get(global_camera, folder, filename, GP_FILE_TYPE_RAW, file, global_context);
+    }
+
+    if (ret >= GP_OK)
+    {
+        struct stat st;
+        char file_path[8192];
+        snprintf(file_path, sizeof(file_path), "%s/%s", LOCAL_DIR, filename);
+
+        if (stat(file_path, &st) == 0)
+        {
+            _log(LOG_GENERAL, "Skipping existing file %s", file_path);
+        }
+        else
+        {
+            gp_file_save(file, file_path);
+            _log(LOG_GENERAL, "Saved file to %s", file_path);
+        }
+    }
+    else
+    {
+        _log(LOG_ERROR, "Failed to fetch file %s/%s (ret=%d: %s)", folder, filename, ret, gp_result_as_string(ret));
+    }
+
+    gp_file_free(file);
+    return ret;
 }
 
 void list_files_recursive(const char *folder)
 {
-    _log("Recursively entering folder: %s", folder);
+    if (!downloaded_files)
+    {
+        downloaded_files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    }
 
     CameraList *subfolders = NULL;
     gp_list_new(&subfolders);
-    
+
     int ret = gp_camera_folder_list_folders(global_camera, folder, subfolders, global_context);
     if (ret >= GP_OK)
     {
@@ -75,113 +112,138 @@ void list_files_recursive(const char *folder)
             }
         }
     }
+    else
+    {
+        camera_cleanup();
+        camera_initialized = 0;
+        camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
+    }
+
     gp_list_free(subfolders);
 
     CameraList *files = NULL;
     gp_list_new(&files);
+
     ret = gp_camera_folder_list_files(global_camera, folder, files, global_context);
     if (ret >= GP_OK)
     {
         int file_count = gp_list_count(files);
+        if (file_count > 0)
+        {
+            _log(LOG_GENERAL, "Importing images for folder %s", folder);
+        }
         for (int j = 0; j < file_count; j++)
         {
             const char *filename = NULL;
             gp_list_get_name(files, j, &filename);
             if (filename)
             {
-                _log("Downloading file %s/%s", folder, filename);
+                char fullpath[2048];
+                snprintf(fullpath, sizeof(fullpath), "%s/%s", folder, filename);
 
-                CameraFile *file = NULL;
-                gp_file_new(&file);
-
-                if (gp_camera_file_get(global_camera, folder, filename, GP_FILE_TYPE_NORMAL, file, global_context) >= GP_OK)
+                if (!g_hash_table_contains(downloaded_files, fullpath))
                 {
-                    char file_path[8192];
-                    snprintf(file_path, sizeof(file_path), "%s/%s", LOCAL_DIR, filename);
-
-                    struct stat st;
-                    if (stat(file_path, &st) == 0)
-                    {
-                        _log("Skipping existing file %s", file_path);
-                    }
-                    else
-                    {
-                        gp_file_save(file, file_path);
-                        _log("Saved file to %s", file_path);
-                    }
+                    _log(LOG_GENERAL, "Downloading file %s", fullpath);
+                    fetch_file(folder, filename);
+                    g_hash_table_add(downloaded_files, g_strdup(fullpath));
                 }
-                else
-                {
-                    _log("Failed to download file %s/%s", folder, filename);
-                }
-                gp_file_free(file);
             }
         }
+    }
+    else
+    {
+        camera_cleanup();
+        camera_initialized = 0;
+        camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
     }
     gp_list_free(files);
 }
 
-void camera_init_global()
+static int try_init_camera_once()
 {
-    if (camera_initialized)
-    {
-        _log("Camera already inited");
-        return;
-    }
+    _log(LOG_GENERAL, "Attempting to initialize camera...");
+    int ret;
 
-    _log("Attempting global init of camera.");
-    global_context = gp_context_new();
     if (!global_context)
     {
-        camera_found = 0;
-        _log("Failed to create gphoto2 context.");
-        return;
+        global_context = gp_context_new();
+        if (!global_context)
+        {
+            return -1;
+        }
     }
 
-    const int MAX_RETRIES = 3;
-    for (int attempt = 0; attempt < MAX_RETRIES; attempt++)
+    if (global_camera)
     {
-        kill_camera_users(); // release any existing handles before retrying
-
-        if (gp_camera_new(&global_camera) < GP_OK)
-        {
-            _log("Failed to create camera object (attempt %d)", attempt + 1);
-            sleep(1);
-            continue;
-        }
-
-        int ret = gp_camera_init(global_camera, global_context);
-        if (ret >= GP_OK)
-        {
-            camera_initialized = 1;
-            camera_found = 1;
-            _log("Camera initialized.");
-            return;
-        }
-        else if (ret == -53)
-        {
-            _log("Camera device busy (-53), will retry.");
-            camera_found = -1;
-        }
-        else
-        {
-            _log("Camera init failed (ret=%d: %s)", ret, gp_result_as_string(ret));
-            camera_found = 0;
-        }
-
         gp_camera_exit(global_camera, global_context);
         gp_camera_free(global_camera);
         global_camera = NULL;
-        sleep(1);
+    }
+
+    if ((ret = gp_camera_new(&global_camera)) < GP_OK)
+    {
+        camera_cleanup();
+        return ret;
+    }
+
+    ret = gp_camera_init(global_camera, global_context);
+    if (ret < GP_OK)
+    {
+        gp_camera_exit(global_camera, global_context);
+        gp_camera_free(global_camera);
+        global_camera = NULL;
+        camera_found = -1;
+        return ret;
+    }
+
+    _log(LOG_GENERAL, "Camera successfully initialized.");
+    camera_initialized = 1;
+    camera_found = 1;
+    return GP_OK;
+}
+
+void camera_init_global(void)
+{
+    const int MAX_RETRIES = 2;
+    int attempt = 0;
+
+    camera_cleanup(); // ensure fresh state before attempting
+
+    for (attempt = 0; attempt < MAX_RETRIES && !stop_requested; ++attempt)
+    {
+        int ret = try_init_camera_once();
+        if (ret >= GP_OK)
+        {
+            _log(LOG_GENERAL, "Initialization attempt completed successfully.");
+            return;
+        }
+
+        if (ret == GP_ERROR_MODEL_NOT_FOUND || ret == -105)
+        {
+            camera_found = 0;
+            _log(LOG_GENERAL, "Camera not present (attempt %d).", attempt + 1);
+        }
+        else if (ret == GP_ERROR_CAMERA_BUSY || ret == -53)
+        {
+            camera_found = -1;
+            _log(LOG_ERROR, "Device busy (attempt %d).", attempt + 1);
+        }
+        else
+        {
+            camera_found = 0;
+            _log(LOG_ERROR, "gp init failed (ret=%d: %s) (attempt %d).", ret, gp_result_as_string(ret), attempt + 1);
+        }
+
+        sleep(1 + attempt); // backoff and stall before retrying
     }
 
     camera_initialized = 0;
-    camera_found = 0;
-    _log("Camera could not be initialized.");
+    _log(LOG_GENERAL, "Camera could not be initialized.");
 }
 
-void download_existing_files_from_camera()
+void download_existing_files_from_camera(ImageStatus *image_status)
 {
+    _log(LOG_GENERAL, "Attempting to download existing files to device from camera.");
     pthread_mutex_lock(&camera_mutex);
 
     if (!camera_initialized)
@@ -189,7 +251,7 @@ void download_existing_files_from_camera()
         camera_init_global();
         if (!camera_initialized)
         {
-            _log("Camera failed intialized in download_existing_files_from_camera()... aborting...");
+            _log(LOG_ERROR, "Camera failed intialized in download_existing_files_from_camera()... aborting...");
             pthread_mutex_unlock(&camera_mutex);
             return;
         }
@@ -198,16 +260,19 @@ void download_existing_files_from_camera()
     camera_busy_flag = 1;
     CameraList *folders = NULL;
     gp_list_new(&folders);
+
     int ret = gp_camera_folder_list_folders(global_camera, "/", folders, global_context);
     if (ret < GP_OK)
     {
-        _log("Failed to list folders: %d", ret);
+        _log(LOG_ERROR, "Failed to list folders: %d", ret);
         gp_list_free(folders);
         camera_busy_flag = 0;
         pthread_mutex_unlock(&camera_mutex);
         return;
     }
 
+    image_status->status = internet_up ? CAMERA_STATUS_IMPORTING : CAMERA_STATUS_IMPORT_ONLY;
+    _log(LOG_GENERAL, "Importing images for from camera...");
     list_files_recursive("/");
 
     gp_list_free(folders);
@@ -215,147 +280,130 @@ void download_existing_files_from_camera()
     pthread_mutex_unlock(&camera_mutex);
 }
 
-int check_if_camera_is_connected()
-{
-    int found = 0;
-
-    pthread_mutex_lock(&camera_mutex);
-
-    gp_camera_exit(global_camera, global_context); // close previous session
-    int ret = gp_camera_init(global_camera, global_context);
-    found = (ret >= GP_OK) ? 1 : 0;
-
-    pthread_mutex_unlock(&camera_mutex);
-
-    return found;
-}
-
 void *import_upload_worker(void *arg) 
 {
     ImageStatus *image_status = (ImageStatus *)arg;
 
-    _log("Starting upload worker.");
+    _log(LOG_GENERAL, "Starting upload worker.");
 
     while (!stop_requested) 
     {
-        download_existing_files_from_camera();
-        _log("Existing file download complete.");
-        image_status->imported = count_imported_images();
-        image_status->uploaded = count_uploaded_images();
-
-        static time_t last_camera_check = 0;
-        time_t now = time(NULL);
-
-
-        // check if camera connected
-        camera_found = check_if_camera_is_connected();
-        _log("Camera status check complete: %i", camera_found);
-
-        if (now - last_camera_check >= 2) 
+        // Step 1: Ensure camera is initialized
+        if (!camera_initialized)
         {
-            _log("Entering...");
-            last_camera_check = now;
-
-            if ((camera_found > 0)) 
+            pthread_mutex_lock(&camera_mutex);
+            int ret = gp_camera_new(&global_camera);
+            if (ret >= GP_OK)
             {
-                pthread_mutex_lock(&camera_mutex);
-                _log("Starting camera download process.");
-
-                Camera *camera;
-                GPContext *context = gp_context_new();
-                int ret = gp_camera_new(&camera);
-                if (ret < GP_OK) 
+                ret = gp_camera_init(global_camera, global_context);
+                if (ret >= GP_OK)
                 {
-                    _log("Failed to create camera instance.");
-                } 
-                else 
-                {
-                    ret = gp_camera_init(camera, context);
-                    if (ret < GP_OK) 
-                    {
-                        _log("Failed to initialize camera.");
-                        gp_camera_free(camera);
-                    } 
-                    else 
-                    {
-                        CameraFile *file;
-                        gp_file_new(&file);
-
-                        CameraEventType event_type;
-                        void *event_data = NULL;
-                        ret = gp_camera_wait_for_event(camera, 2000, &event_type, &event_data, context);
-
-                        if (event_type == GP_EVENT_FILE_ADDED) 
-                        {
-                            CameraFilePath *path = (CameraFilePath *)event_data;
-                            _log("New file added: %s/%s", path->folder, path->name);
-                        }
-
-                        if (ret == GP_OK) 
-                        {
-                            image_status->status = internet_up ? 1 : 3;
-                        } 
-                        else 
-                        {
-                            _log("Camera event wait failed: %d", ret);
-                        }
-
-                        gp_file_free(file);
-                        gp_camera_exit(camera, context);
-                        gp_camera_free(camera);
-                    }
+                    camera_initialized = 1;
+                    camera_found = 1;
+                    _log(LOG_GENERAL, "Camera reinitialized in worker loop.");
                 }
-                pthread_mutex_unlock(&camera_mutex);
+                else
+                {
+                    gp_camera_free(global_camera);
+                    global_camera = NULL;
+                    camera_initialized = 0;
+                    camera_found = ret == -53 ? -1 : 0;
+                    _log(LOG_GENERAL, ret == -53 ? "Camera busy... could not connect." :  "No camera detected.");
+                }
             }
             else
             {
-                _log("Camera not found in import...");
+                camera_initialized = 0;
+                camera_found = 0;
+                _log(LOG_GENERAL, "Failed to create camera in worker loop.");
+            }
+            pthread_mutex_unlock(&camera_mutex);
+        }
+
+        // Step 2: Only fetch files if camera is initialized and available
+        if (camera_initialized && camera_found > 0)
+        {
+            download_existing_files_from_camera(image_status);
+            _log(LOG_GENERAL, "Existing file download complete.");
+        }
+
+        // Update status
+        image_status->imported = count_imported_images();
+        image_status->uploaded = count_uploaded_images();
+
+        // Step 3: Periodically handle camera events (no reinit)
+        static time_t last_camera_check = 0;
+        time_t now = time(NULL);
+        if (now - last_camera_check >= 2) 
+        {
+            last_camera_check = now;
+
+            if (camera_initialized && camera_found > 0)
+            {
+                pthread_mutex_lock(&camera_mutex);
+
+                CameraFile *file;
+                gp_file_new(&file);
+                CameraEventType event_type;
+                void *event_data = NULL;
+                int ret = gp_camera_wait_for_event(global_camera, 2000, &event_type, &event_data, global_context);
+
+                if (event_type == GP_EVENT_FILE_ADDED) 
+                {
+                    CameraFilePath *path = (CameraFilePath *)event_data;
+                    _log(LOG_GENERAL, "New file added: %s/%s", path->folder, path->name);
+                }
+
+                if (ret != GP_OK) 
+                {
+                    _log(LOG_GENERAL, "Camera event wait failed: %d", ret);
+                    camera_cleanup();
+                    camera_initialized = 0;
+                    image_status->status = CAMERA_STATUS_NO_CAMERA;
+                    camera_found = (ret == GP_ERROR_MODEL_NOT_FOUND) ? 0 : -1;
+                }
+
+                gp_file_free(file);
+                pthread_mutex_unlock(&camera_mutex);
             }
         }
 
-        // Upload images
+        // Step 4: Upload images
         DIR *d = opendir(LOCAL_DIR);
         if (internet_up && d) 
         {
-            _log("FTP beginning...");
-            image_status->status = 2; // uploading
             struct dirent *dir;
-            int counter = 0;
             while ((dir = readdir(d)) != NULL) 
             {
-                counter++;
-                if (dir->d_type != DT_REG) 
+                if (dir->d_type != DT_REG)
                 {
                     continue;
                 }
 
                 const char *ext = strrchr(dir->d_name, '.');
-                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg"))) 
+                if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg")))
                 {
                     continue;
                 }
-
-                if (is_uploaded(dir->d_name)) 
+                if (is_uploaded(dir->d_name))
                 {
                     continue;
                 }
-
-                _log("Ready to try FTP");
 
                 char path[1024];
+                image_status->status = CAMERA_STATUS_UPLOADING;
                 snprintf(path, sizeof(path), "%s/%s", LOCAL_DIR, dir->d_name);
-                if (upload_file(path, dir->d_name)) 
+
+                if (upload_file(path, dir->d_name))
                 {
                     mark_uploaded(dir->d_name);
                 }
             }
-            image_status->status = 0;
             closedir(d);
         } 
-        else if (!internet_up && (camera_found > 0)) 
+        else if (!internet_up && camera_found > 0) 
         {
-            _log("No FTP attempt...");
-            image_status->status = 3;
+            image_status->status = CAMERA_STATUS_IMPORT_ONLY;
         }
 
         usleep(100000);

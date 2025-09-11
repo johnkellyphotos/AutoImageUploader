@@ -45,7 +45,7 @@ int upload_file(const char *filepath, const char *filename)
 
         if (!hd_src) 
         {
-            _log("Failed to open file: %s.", filepath);
+            _log(LOG_ERROR, "Failed to open file: %s.", filepath);
             curl_easy_cleanup(curl);
             return 0;
         }
@@ -55,7 +55,7 @@ int upload_file(const char *filepath, const char *filename)
 
         if (curl_easy_perform(curl) == CURLE_OK)
         {
-            _log("FTP of file complete for image %s to %s.", filepath, FTP_URL);
+            _log(LOG_GENERAL, "FTP of file complete for image %s to %s.", filepath, FTP_URL);
             success = 1;
         }
 
@@ -64,7 +64,7 @@ int upload_file(const char *filepath, const char *filename)
     }
     else
     {
-        _log("CURL failed to initialize.");
+        _log(LOG_ERROR, "CURL failed to initialize.");
     }
 
     return success;
@@ -79,11 +79,11 @@ void mark_uploaded(const char *filename)
     {
         fprintf(f, "%s\n", filename);
         fclose(f);
-        _log("Tracked upload for %s in track file.", filename);
+        _log(LOG_GENERAL, "Tracked upload for %s in track file.", filename);
     } 
     else 
     {
-        _log("Unable to log upload in track file (%s) for %s.", TRACK_FILE, filename);
+        _log(LOG_ERROR, "Unable to log upload in track file (%s) for %s.", TRACK_FILE, filename);
     }
 
     pthread_mutex_unlock(&track_file_mutex);

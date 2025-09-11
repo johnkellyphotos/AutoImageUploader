@@ -50,12 +50,23 @@ typedef struct
 
 WifiNetwork networks[MAX_NETWORKS];
 
+typedef enum
+{
+    CAMERA_STATUS_NO_CAMERA,
+    CAMERA_STATUS_WAITING,
+    CAMERA_STATUS_IMPORTING,
+    CAMERA_STATUS_UPLOADING,
+    CAMERA_STATUS_IMPORT_ONLY
+} IMAGE_STATUS;
+
 typedef struct
 {
     int imported;
     int uploaded;
-    int status; // 0 = waiting, 1 = importing, 2 = uploading, 3 = No internet, import only
+    IMAGE_STATUS status; // 0 = waiting, 1 = importing, 2 = uploading, 3 = No internet, import only
 } ImageStatus;
+
+
 
 Screen current_screen = SCREEN_MAIN;
 
@@ -134,11 +145,11 @@ int list_networks(int max)
     FILE *fp = popen("nmcli -t -f SSID dev wifi", "r");
     if (!fp)
     {
-        _log("Can not open file tto read Wifi status.");
+        _log(LOG_ERROR, "Can not open file tto read Wifi status.");
         return 0;
     }
 
-    _log("Attempting to read Wifi information...");
+    _log(LOG_GENERAL, "Attempting to read Wifi information...");
 
     int count = 0;
     char line[256];
@@ -163,14 +174,14 @@ int list_networks(int max)
 
             if (add_to_network_list)
             {
-                _log("Adding network %s to network list.", line);
+                _log(LOG_GENERAL, "Adding network %s to network list.", line);
                 strncpy(networks[count].ssid, line, sizeof(networks[count].ssid));
                 networks[count].ssid[sizeof(networks[count].ssid)-1] = 0;
                 count++;
             }
             else
             {
-                _log("Declining to add network %s to network list because it is a duplicate.", line);
+                _log(LOG_GENERAL, "Declining to add network %s to network list because it is a duplicate.", line);
             }
         }
     }
@@ -405,21 +416,25 @@ void render_status_box(SDL_Renderer *renderer, TTF_Font *font, ImageStatus *imag
     char status_str[64];
     switch (image_status->status)
     {
-        case 0:
+        case CAMERA_STATUS_NO_CAMERA:
+            strcpy(status_str, "Please attach or power on a camera");
+            color = ui_colors.red;
+            break;
+        case CAMERA_STATUS_WAITING:
             strcpy(status_str, "Waiting for images");
             color = ui_colors.white;
             break;
-        case 1:
+        case CAMERA_STATUS_IMPORTING:
             strcpy(status_str, "Importing images");
-            color = ui_colors.yellow;
+            color = ui_colors.green;
             break;
-        case 2:
+        case CAMERA_STATUS_UPLOADING:
             strcpy(status_str, "Uploading images");
             color = ui_colors.green;
             break;
-        case 3:
+        case CAMERA_STATUS_IMPORT_ONLY:
             strcpy(status_str, "Importing images only - no internet");
-            color = ui_colors.red;
+            color = ui_colors.yellow;
             break;
     }
     
@@ -552,7 +567,7 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
 
     if (!has_attempted_connection)
     {
-        _log("Attempting to connect to network...");
+        _log(LOG_GENERAL, "Attempting to connect to network...");
         network_connect_complete_status = 0;
         network_connect_complete = 0;
         has_attempted_connection = 1;
@@ -560,7 +575,7 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
         if (conn_pid == 0)
         {
             // call the existing blocking function in the child
-            _log("Connection attempt initiated.");
+            _log(LOG_GENERAL, "Connection attempt initiated.");
             int ret = connect_to_network(networks[select_network_index].ssid);
             _exit(ret);
         }
@@ -581,12 +596,12 @@ void render_attempting_network_connection_screen(SDL_Renderer *renderer, TTF_Fon
 
             if (conn_status != 0)
             {
-                _log("Network connection failed: %d\n", conn_status);
+                _log(LOG_GENERAL, "Network connection failed: %d", conn_status);
                 network_connect_complete_status = -1;
             }
             else
             {
-                _log("Network connected successfully\n");
+                _log(LOG_ERROR, "Network connected successfully");
                 network_connect_complete_status = 1;
             }
 
@@ -664,7 +679,7 @@ void render_clear_imports_complete_screen(SDL_Renderer * renderer, TTF_Font * fo
         delete_images_in_import_folder();
         clear_track_file();
         clear_log_file();
-        _log("Log file cleared by user.");
+        _log(LOG_GENERAL, "Log file cleared by user.");
     }
 
     char confirmation_text[] = "Imported images have been deleted from device.";

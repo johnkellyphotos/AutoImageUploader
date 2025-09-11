@@ -22,21 +22,27 @@ volatile sig_atomic_t stop_requested = 0;
 
 int main(int argc, char *argv[]) 
 {
-    _log("Program start.");
+    _log(LOG_GENERAL, "Uploader started... Ready.");
 
     int full_screen_mode = 0;
+    logging_status = LOGGIN_ERROR_ONLY;
 
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "--fullscreen") == 0)
         {
-            _log("Full screen mode enabled.");
+            _log(LOG_GENERAL, "Full screen mode enabled.");
             full_screen_mode = 1;
             break;
         }
+        else if (strcmp(argv[i], "--log-all") == 0)
+        {
+            logging_status = LOGGIN_ALL;
+        }
         else
         {
-            _log("Invalid argument %s. Valid options are '--fullscreen' only.", argv[i]);
+            printf("Invalid argument %s. Valid options are '--fullscreen' only.\n", argv[i]);
+            _log(LOG_ERROR, "Invalid argument %s. Valid options are '--fullscreen' only.", argv[i]);
             return 10;
         }
     }
@@ -59,7 +65,7 @@ int main(int argc, char *argv[])
 
     load_config();
 
-    _log("Initialization complete.");
+    _log(LOG_GENERAL, "Initialization complete.");
 
     // thread to constantly check for attached camera, import images, FTP images
     pthread_t worker;
