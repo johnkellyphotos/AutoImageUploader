@@ -23,8 +23,12 @@ volatile int camera_busy_flag = 0;
 
 void kill_device_mount_to_camera()
 {
-    // sometimes the computer will mount the device BEFORE this program can mount it.
-    // Since this program will retry and the computer OS will not, kill process mounting it
+    /* 
+    * In some occasions, the filesystem will mount the device BEFORE this program can mount it.
+    * By killing all mounts for the camera device, we allow this program to retry
+    * to mount, where the filesystem will not attempt to remount under normal conditions. If
+    * this were to fail, the user would need to manually unmount the camera for the filesystem
+    */
     system("pkill -f gvfsd-gphoto2");
     system("pkill -f gvfs-gphoto2-volume-monitor");
 }
