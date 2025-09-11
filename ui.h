@@ -328,21 +328,12 @@ int get_link_strength()
     return strength;
 }
 
-void* link_poll_thread()
-{
-    while (!stop_requested)
-    {
-        link_strength_value = get_link_strength();
-        usleep(1000000);
-    }
-    return NULL;
-}
-
 void* internet_poll_thread()
 {
     while (!stop_requested)
     {
         internet_up = (system("ping -c 1 8.8.8.8 > /dev/null 2>&1") == 0);
+        link_strength_value = get_link_strength();
         sleep(2);
     }
     return NULL;
