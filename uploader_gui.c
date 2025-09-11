@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            printf("Invalid argument %s. Valid options are '--fullscreen' only.\n", argv[i]);
+            printf("Invalid argument %s. Valid options are '--fullscreen' or '--log-all' only.\n", argv[i]);
             _log(LOG_ERROR, "Invalid argument %s. Valid options are '--fullscreen' only.", argv[i]);
             return 10;
         }
@@ -74,10 +74,6 @@ int main(int argc, char *argv[])
     // thread to constantly check for internet connection. Internet is critical to program use. Program intended to be run in areas with limited internet
     pthread_t internet_is_up;
     pthread_create(&internet_is_up, NULL, internet_poll_thread, NULL);
-
-    // thread to constantly check for connection strength. Internet is critical to program use. Program intended to be run in areas with limited internet
-    pthread_t link_strength;
-    pthread_create(&link_strength, NULL, link_poll_thread, NULL);
 
     run_UI(&program_status, full_screen_mode);
 
